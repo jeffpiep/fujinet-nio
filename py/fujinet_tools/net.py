@@ -249,6 +249,7 @@ def cmd_net_open(args) -> int:
         headers=_collect_request_headers(args),
         body_len_hint=args.body_len_hint,
         response_headers=getattr(args, "resp_header", None) or [],
+        json_query=getattr(args, "json_query", None),
     )
 
     with open_serial(args.port, args.baud, timeout_s=0.01) as ser:
@@ -271,8 +272,11 @@ def cmd_net_open(args) -> int:
             return 1
 
         orr = np.parse_open_resp(pkt.payload)
+        extra = ""
+        if getattr(args, "json_query", None):
+            extra = f" json_query={args.json_query}"
         print(
-            f"accepted={orr.accepted} needs_body_write={orr.needs_body_write} handle={orr.handle}"
+            f"accepted={orr.accepted} needs_body_write={orr.needs_body_write} handle={orr.handle}{extra}"
         )
         return 0
 
@@ -464,6 +468,7 @@ def cmd_net_get(args) -> int:
             headers=_collect_request_headers(args),
             body_len_hint=0,
             response_headers=resp_headers,
+            json_query=getattr(args, "json_query", None),
         )
         pkt = _send_retry_not_ready(
             bus=bus,
@@ -732,6 +737,7 @@ def cmd_net_send(args) -> int:
                 else (body_len_hint if (args.method in (2, 3)) else 0)
             ),
             response_headers=resp_headers,
+            json_query=getattr(args, "json_query", None),
         )
 
         # OPEN
@@ -969,6 +975,11 @@ def register_subcommands(subparsers) -> None:
         help="Expected request body length (POST/PUT)",
     )
     pno.add_argument(
+        "--json-query",
+        default=None,
+        help="JSON Pointer path (RFC 6901) for server-side JSON query. Response is the query result.",
+    )
+    pno.add_argument(
         "--resp-header",
         action="append",
         default=[],
@@ -1020,6 +1031,11 @@ def register_subcommands(subparsers) -> None:
         "--force", action="store_true", help="Overwrite --out if it exists"
     )
     png.add_argument("--show-headers", action="store_true")
+    png.add_argument(
+        "--json-query",
+        default=None,
+        help="JSON Pointer path (RFC 6901) for server-side JSON query",
+    )
     png.add_argument(
         "--resp-header",
         action="append",
@@ -1082,6 +1098,11 @@ def register_subcommands(subparsers) -> None:
         help="POST/PUT only: send request body using unknown-length streaming mode (Open(body_len_hint=0 + flag) + Write chunks + final zero-length Write commit)",
     )
     pns.add_argument("--show-headers", action="store_true")
+    pns.add_argument(
+        "--json-query",
+        default=None,
+        help="JSON Pointer path (RFC 6901) for server-side JSON query",
+    )
     pns.add_argument(
         "--resp-header",
         action="append",

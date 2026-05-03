@@ -7,8 +7,14 @@
 #include "fujinet/io/devices/network_protocol.h"
 #include "fujinet/io/devices/network_protocol_registry.h"
 
+#include "cJSON.h"
+#include "cJSON_Utils.h"
+
 #include <algorithm>
 #include <cctype>
+#include <cmath>
+#include <iomanip>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -97,6 +103,55 @@ static bool check_version(Reader& r, std::uint8_t expected)
     return r.read_u8(ver) && ver == expected;
 }
 
+static bool is_approx_integer(double v)
+{
+    double i = 0.0;
+    return std::modf(v, &i) == 0.0 && v >= -9007199254740992.0 && v <= 9007199254740992.0;
+}
+
+static std::string json_item_to_string(cJSON* item)
+{
+    if (!item) return {};
+
+    std::ostringstream ss;
+
+    if (cJSON_IsString(item)) {
+        char* s = cJSON_GetStringValue(item);
+        if (s) ss << s;
+    } else if (cJSON_IsBool(item)) {
+        ss << (cJSON_IsTrue(item) ? "TRUE" : "FALSE");
+    } else if (cJSON_IsNull(item)) {
+        ss << "NULL";
+    } else if (cJSON_IsNumber(item)) {
+        double num = cJSON_GetNumberValue(item);
+        if (is_approx_integer(num)) {
+            ss << static_cast<int64_t>(num);
+        } else {
+            ss << std::setprecision(10) << num;
+        }
+    } else if (cJSON_IsObject(item)) {
+        cJSON* child = item->child;
+        if (child) {
+            do {
+                ss << child->string << "\n" << json_item_to_string(child);
+                if (child->next) ss << "\n";
+            } while ((child = child->next) != nullptr);
+        }
+    } else if (cJSON_IsArray(item)) {
+        cJSON* child = item->child;
+        bool first = true;
+        if (child) {
+            do {
+                if (!first) ss << "\n";
+                ss << json_item_to_string(child);
+                first = false;
+            } while ((child = child->next) != nullptr);
+        }
+    }
+
+    return ss.str();
+}
+
 IOResponse NetworkDevice::handle(const IORequest& request)
 {
     auto cmd = protocol::to_network_command(request.command);
@@ -181,6 +236,18 @@ IOResponse NetworkDevice::handle(const IORequest& request)
                 respHeaderNamesLower.emplace_back(to_lower_ascii(name));
             }
             
+            // NEW: optional JSON query (JSON Pointer path)
+            // Backward compatible: old clients don't send this field.
+            std::string parsedJsonQuery;
+            if (r.remaining() > 0) {
+                std::string_view jsonQueryView;
+                if (!r.read_lp_u16_string(jsonQueryView)) {
+                    resp.status = StatusCode::InvalidRequest;
+                    return resp;
+                }
+                parsedJsonQuery.assign(jsonQueryView.data(), jsonQueryView.size());
+            }
+
             if (r.remaining() != 0) {
                 resp.status = StatusCode::InvalidRequest;
                 return resp;
@@ -206,6 +273,7 @@ IOResponse NetworkDevice::handle(const IORequest& request)
             openReq.headers = std::move(headers);
             openReq.bodyLenHint = bodyLenHint;
             openReq.responseHeaderNamesLower = std::move(respHeaderNamesLower);
+            openReq.jsonQuery = std::move(parsedJsonQuery);
             
             const bool methodAllowsBody = (method == 2 /*POST*/ || method == 3 /*PUT*/);
             // Keep v1 simple + deterministic: only POST/PUT may declare a body.
@@ -290,6 +358,7 @@ IOResponse NetworkDevice::handle(const IORequest& request)
             slot->method = method;
             slot->flags = flags;
             slot->url = openReq.url;
+            slot->jsonQuery = std::move(openReq.jsonQuery);
             slot->proto = std::move(proto);
 
             // Body streaming state is enforced at NetworkDevice layer (cheap bookkeeping).
@@ -396,6 +465,12 @@ IOResponse NetworkDevice::handle(const IORequest& request)
                 return resp;
             }
 
+            // JSON query mode: if still buffering, not ready
+            if (!s->jsonQuery.empty() && !s->jsonReady) {
+                resp.status = StatusCode::NotReady;
+                return resp;
+            }
+
             NetworkInfo info{};
             const StatusCode st = s->proto->info(info);
             if (st != StatusCode::Ok) {
@@ -407,8 +482,16 @@ IOResponse NetworkDevice::handle(const IORequest& request)
             // bit0=headersAvailable, bit1=hasContentLength, bit2=hasHttpStatus
             const std::size_t hdrLen = info.headersBlock.size();
             if (hdrLen > 0) flags |= 0x01;
-            if (info.hasContentLength) flags |= 0x02;
             if (info.hasHttpStatus) flags |= 0x04;
+
+            // For JSON queries, report the query result size instead of original body size
+            if (!s->jsonQuery.empty() && s->jsonReady) {
+                flags |= 0x02; // hasContentLength
+                info.contentLength = s->jsonResultSize;
+                info.hasContentLength = true;
+            } else if (info.hasContentLength) {
+                flags |= 0x02;
+            }
 
             std::string out;
             out.reserve(1 + 1 + 2 + 2 + 2 + 8 + 4);
@@ -518,43 +601,166 @@ IOResponse NetworkDevice::handle(const IORequest& request)
                 return resp;
             }
 
-            std::vector<std::uint8_t> buf;
-            buf.resize(maxBytes);
-
             std::uint16_t n = 0;
             bool eof = false;
-            const StatusCode st = s->proto->read_body(offset, buf.data(), buf.size(), n, eof);
-            if (st != StatusCode::Ok) {
-                resp.status = st;
+            std::string out;
+            std::uint8_t flags = 0;
+
+            // JSON query mode: buffer full body, parse, serve result
+            if (!s->jsonQuery.empty()) {
+                if (s->jsonReady) {
+                    // Serve from cached jsonResult
+                    const auto total = static_cast<std::uint32_t>(s->jsonResult.size());
+                    if (offset > total) {
+                        resp.status = StatusCode::InvalidRequest;
+                        return resp;
+                    }
+                    const auto remaining = total - offset;
+                    n = static_cast<std::uint16_t>(std::min<std::uint32_t>(remaining, maxBytes));
+                    eof = (offset + n >= total);
+
+                    out.reserve(1 + 1 + 2 + 2 + 4 + 2 + n);
+                    if (eof) {
+                        flags |= 0x01;
+                        s->completed = true;
+                    }
+                    if (n == maxBytes && !eof) {
+                        flags |= 0x02;
+                    }
+                    write_common_prefix(out, NETPROTO_VERSION, flags);
+                    netproto::write_u16le(out, handle);
+                    netproto::write_u32le(out, offset);
+                    netproto::write_u16le(out, n);
+                    if (n > 0) {
+                        netproto::write_bytes(out,
+                            reinterpret_cast<const std::uint8_t*>(s->jsonResult.data() + offset), n);
+                    }
+                    resp.payload = to_vec(out);
+                    return resp;
+                }
+
+                // Buffering mode: accumulate full body from protocol backend
+                s->jsonBuffering = true;
+                {
+                    std::uint8_t tmp[4096];
+                    while (true) {
+                        std::uint16_t chunk = 0;
+                        bool chunkEof = false;
+                        StatusCode st = s->proto->read_body(
+                            static_cast<std::uint32_t>(s->jsonBodyBuffer.size()),
+                            tmp, sizeof(tmp), chunk, chunkEof);
+                        if (st == StatusCode::NotReady) {
+                            resp.status = StatusCode::NotReady;
+                            return resp;
+                        }
+                        if (st != StatusCode::Ok) {
+                            // Backend error; fall back to normal read by clearing jsonQuery
+                            s->jsonQuery.clear();
+                            s->jsonBuffering = false;
+                            break;
+                        }
+                        if (chunk > 0) {
+                            s->jsonBodyBuffer.append(reinterpret_cast<const char*>(tmp), chunk);
+                        }
+                        if (chunkEof) {
+                            // Full body buffered; parse JSON and apply query
+                            cJSON* json = cJSON_Parse(s->jsonBodyBuffer.c_str());
+                            if (json) {
+                                cJSON* item = cJSONUtils_GetPointer(json, s->jsonQuery.c_str());
+                                if (item) {
+                                    s->jsonResult = json_item_to_string(item);
+                                    s->jsonResultSize = static_cast<std::uint32_t>(s->jsonResult.size());
+                                } else {
+                                    s->jsonResult.clear();
+                                    s->jsonResultSize = 0;
+                                }
+                                cJSON_Delete(json);
+                            } else {
+                                s->jsonResult.clear();
+                                s->jsonResultSize = 0;
+                            }
+                            s->jsonReady = true;
+                            s->jsonBuffering = false;
+
+                            // Fall through to serve result below
+                            break;
+                        }
+                        if (chunk == 0) {
+                            break; // no data this iteration, try again next Read
+                        }
+                    }
+                }
+
+                if (s->jsonReady) {
+                    // Serve from jsonResult (same logic as above)
+                    const auto total = static_cast<std::uint32_t>(s->jsonResult.size());
+                    if (offset > total) {
+                        resp.status = StatusCode::InvalidRequest;
+                        return resp;
+                    }
+                    const auto remaining = total - offset;
+                    n = static_cast<std::uint16_t>(std::min<std::uint32_t>(remaining, maxBytes));
+                    eof = (offset + n >= total);
+
+                    out.reserve(1 + 1 + 2 + 2 + 4 + 2 + n);
+                    if (eof) {
+                        flags |= 0x01;
+                        s->completed = true;
+                    }
+                    if (n == maxBytes && !eof) {
+                        flags |= 0x02;
+                    }
+                    write_common_prefix(out, NETPROTO_VERSION, flags);
+                    netproto::write_u16le(out, handle);
+                    netproto::write_u32le(out, offset);
+                    netproto::write_u16le(out, n);
+                    if (n > 0) {
+                        netproto::write_bytes(out,
+                            reinterpret_cast<const std::uint8_t*>(s->jsonResult.data() + offset), n);
+                    }
+                    resp.payload = to_vec(out);
+                    return resp;
+                }
+
+                // jsonQuery was cleared due to error; fall through to normal read
+            }
+
+            // Normal (non-JSON) read path
+            {
+                std::vector<std::uint8_t> buf;
+                buf.resize(maxBytes);
+
+                const StatusCode st = s->proto->read_body(offset, buf.data(), buf.size(), n, eof);
+                if (st != StatusCode::Ok) {
+                    resp.status = st;
+                    return resp;
+                }
+
+                if (n > buf.size()) {
+                    n = static_cast<std::uint16_t>(buf.size());
+                }
+
+                out.reserve(1 + 1 + 2 + 2 + 4 + 2 + n);
+
+                if (eof) {
+                    flags |= 0x01;
+                    s->completed = true;
+                }
+                if (n == maxBytes && !eof) {
+                    flags |= 0x02;
+                }
+
+                write_common_prefix(out, NETPROTO_VERSION, flags);
+                netproto::write_u16le(out, handle);
+                netproto::write_u32le(out, offset);
+                netproto::write_u16le(out, n);
+                if (n > 0 && !buf.empty()) {
+                    netproto::write_bytes(out, buf.data(), n);
+                }
+
+                resp.payload = to_vec(out);
                 return resp;
             }
-
-            if (n > buf.size()) {
-                n = static_cast<std::uint16_t>(buf.size());
-            }
-
-            std::string out;
-            out.reserve(1 + 1 + 2 + 2 + 4 + 2 + n);
-
-            std::uint8_t flags = 0;
-            if (eof) {
-                flags |= 0x01;
-                s->completed = true;
-            }
-            if (n == maxBytes && !eof) {
-                flags |= 0x02; // truncated: we hit the caller's limit and there is (likely) more to read
-            }
-
-            write_common_prefix(out, NETPROTO_VERSION, flags);
-            netproto::write_u16le(out, handle);
-            netproto::write_u32le(out, offset);
-            netproto::write_u16le(out, n);
-            if (n > 0 && !buf.empty()) {
-                netproto::write_bytes(out, buf.data(), n);
-            }
-
-            resp.payload = to_vec(out);
-            return resp;
         }
 
         case NetworkCommand::Write: {

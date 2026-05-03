@@ -27,6 +27,12 @@ struct NetworkOpenRequest {
     // Response header allowlist (lowercase ASCII header names).
     // If empty: store no response headers.
     std::vector<std::string> responseHeaderNamesLower;
+
+    // Optional JSON Pointer path (RFC 6901) for server-side JSON query.
+    // When non-empty, the device fetches the full response body, parses it
+    // as JSON, applies the JSON Pointer query, and returns only the query
+    // result via subsequent Read calls.
+    std::string jsonQuery;
 };
 
 struct NetworkInfo {

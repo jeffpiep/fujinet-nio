@@ -160,6 +160,9 @@ u16  respHeaderCount   // LE; number of response header names to capture
 repeat respHeaderCount times:
   u16  nameLen         // LE
   u8[] name            // length nameLen (header name, ASCII; case-insensitive)
+
+u16  jsonQueryLen      // LE; 0 = no JSON query
+u8[] jsonQuery         // length jsonQueryLen (JSON Pointer path, e.g. "/value")
 ```
 
 ### Open flags (u8)
@@ -211,6 +214,38 @@ Hosts MUST use these flags to determine offset behavior rather than detecting UR
 Notes:
 - `needs_body_write=1` indicates the host must stream body via `Write` (POST/PUT).
 - `accepted=1` means the handle exists; it does not imply the request has completed.
+
+### JSON Query (v1 optional)
+
+A JSON Pointer path (RFC 6901) may be appended after the response header list:
+
+```
+lp_u16 jsonQuery
+```
+
+When `jsonQuery` is non-empty, the device:
+1. Fetches the full HTTP response body.
+2. Parses it with cJSON.
+3. Applies the JSON Pointer query via `cJSONUtils_GetPointer`.
+4. Serializes the matched value to a string.
+5. Makes the serialized result available via subsequent `Read` commands.
+
+If `jsonQuery` is empty (length 0), the device behaves as before (raw body streaming).
+
+When JSON query is active:
+- `Info` reports the query result size as `contentLength`, not the original body size.
+- `Read` returns data from the serialized query result.
+- During body buffering (full body not yet fetched), `Read`/`Info` return `NotReady`.
+
+Serialization format (intended to be simple for 8-bit hosts):
+- **String**: raw text content (no surrounding quotes)
+- **Number**: integer or floating-point text
+- **Boolean**: `TRUE` or `FALSE`
+- **Null**: `NULL`
+- **Object**: each `key\nvalue\n` pair sequentially
+- **Array**: each element on its own line
+
+This allows the 8-bit host to offload JSON parsing to the FujiNet device, reading only the extracted value(s).
 
 ### Response header capture (v1)
 

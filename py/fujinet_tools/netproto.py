@@ -50,6 +50,7 @@ def build_open_req(
     headers: Optional[List[Tuple[str, str]]] = None,
     body_len_hint: int = 0,
     response_headers: Optional[List[str]] = None,
+    json_query: Optional[str] = None,
 ) -> bytes:
     """
     v1 (updated):
@@ -59,7 +60,8 @@ def build_open_req(
       lp_u16 url
       u16 headerCount; repeated (lp_u16 key, lp_u16 value)
       u32 bodyLenHint
-      u16 respHeaderCount; repeated lp_u16 name   <-- NEW (required)
+      u16 respHeaderCount; repeated lp_u16 name
+      lp_u16 jsonQuery (optional, 0-length = no query)
     """
     if headers is None:
         headers = []
@@ -95,11 +97,18 @@ def build_open_req(
 
     out += u32le(body_len_hint)
 
-    # NEW: response header allowlist (store nothing if empty)
+    # Response header allowlist (store nothing if empty)
     out += u16le(len(response_headers))
     for name in response_headers:
         nb = name.encode("utf-8")
         out += u16le(min(len(nb), 0xFFFF)) + nb[:0xFFFF]
+
+    # Optional JSON query (JSON Pointer path)
+    if json_query:
+        jq_b = json_query.encode("utf-8")
+        out += u16le(len(jq_b)) + jq_b
+    else:
+        out += u16le(0)  # no query
 
     return bytes(out)
 

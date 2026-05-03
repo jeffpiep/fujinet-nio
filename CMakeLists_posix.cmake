@@ -199,6 +199,7 @@ target_sources(fujinet-nio
         src/platform/posix/udp_socket_ops_posix.cpp
 # __TARGET_SOURCES_END__
         third_party/cjson/cJSON.c
+        third_party/cjson/cJSON_Utils.c
 )
 
 

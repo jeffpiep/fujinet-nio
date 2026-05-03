@@ -1,0 +1,56 @@
+group: Network / JSON Query
+steps:
+  - name: "JSON: GET /get with json-query /url"
+    argv: ["{CLI}", "net", "get", "--json-query", "/url", "{HTTP}/get"]
+    expect:
+      - "{HTTP}/get"
+    timeout_s: 10
+    forbid:
+      - "FALSE"
+      - "NotReady"
+
+  - name: "JSON: GET /get with json-query /headers/Host"
+    argv: ["{CLI}", "net", "get", "--json-query", "/headers/Host", "{HTTP}/get"]
+    expect:
+      - "localhost"
+      - "127.0.0.1"
+    timeout_s: 10
+    forbid:
+      - "NotReady"
+
+  - name: "JSON: GET /get with json-query /origin"
+    argv: ["{CLI}", "net", "get", "--json-query", "/origin", "{HTTP}/get"]
+    expect:
+      - "127.0.0.1"
+    timeout_s: 10
+    forbid:
+      - "NotReady"
+
+  - name: "JSON: GET /get with json-query (empty result for non-existent path)"
+    argv: ["{CLI}", "net", "get", "--json-query", "/nonexistent", "{HTTP}/get"]
+    expect:
+      - "total read: 0 bytes"
+    timeout_s: 10
+    forbid:
+      - "NotReady"
+
+  - name: "JSON: Open with json-query then Read"
+    argv: ["{CLI}", "net", "open", "--json-query", "/url", "{HTTP}/get"]
+    expect:
+      - "accepted=true"
+    capture_var:
+      name: HANDLE
+      pattern: "handle=(\\d+)"
+    timeout_s: 10
+
+  - name: "JSON: Read query result from handle"
+    argv: ["{CLI}", "net", "read", "--max-bytes", "512", "{HANDLE}"]
+    expect:
+      - "{HTTP}/get"
+    timeout_s: 10
+
+  - name: "JSON: Close handle"
+    argv: ["{CLI}", "net", "close", "{HANDLE}"]
+    expect:
+      - "closed"
+    timeout_s: 5

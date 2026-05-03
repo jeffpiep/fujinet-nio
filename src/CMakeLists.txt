@@ -117,6 +117,7 @@ idf_component_register(
         platform/esp32/wifi_link.cpp
 # __TARGET_SOURCES_END__
         ../third_party/cjson/cJSON.c
+        ../third_party/cjson/cJSON_Utils.c
     INCLUDE_DIRS
         "../include"
         "../third_party/cjson"

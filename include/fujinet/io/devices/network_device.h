@@ -57,6 +57,14 @@ private:
         std::uint32_t nextBodyOffset  = 0;   // required next Write offset (sequential)
         bool          awaitingBody    = false; // gate Info/Read until body complete
         bool          bodyLenUnknown  = false; // unknown-length body; committed by zero-length Write()
+
+        // JSON query state
+        std::string   jsonQuery;
+        std::string   jsonBodyBuffer;
+        std::string   jsonResult;
+        std::uint32_t jsonResultSize{0};
+        bool          jsonBuffering{false};
+        bool          jsonReady{false};
     };
 
     std::array<Session, MAX_SESSIONS> _sessions{};
@@ -98,6 +106,12 @@ private:
         s.createdTick = 0;
         s.lastActivityTick = 0;
         s.completed = false;
+        s.jsonQuery.clear();
+        s.jsonBodyBuffer.clear();
+        s.jsonResult.clear();
+        s.jsonResultSize = 0;
+        s.jsonBuffering = false;
+        s.jsonReady = false;
     }
 
     // Pick a victim to evict (LRU) if we want to recover from leaky clients.
