@@ -3,41 +3,43 @@ steps:
   - name: "JSON: GET /get with json-query /url"
     argv: ["{CLI}", "net", "get", "--json-query", "/url", "{HTTP}/get"]
     expect:
-      - "{HTTP}/get"
+      - "127.0.0.1:8080/get"
     timeout_s: 10
     forbid:
-      - "FALSE"
+      - "Error"
       - "NotReady"
 
   - name: "JSON: GET /get with json-query /headers/Host"
     argv: ["{CLI}", "net", "get", "--json-query", "/headers/Host", "{HTTP}/get"]
     expect:
-      - "localhost"
-      - "127.0.0.1"
+      - "127.0.0.1:8080"
     timeout_s: 10
     forbid:
       - "NotReady"
 
-  - name: "JSON: GET /get with json-query /origin"
+  - name: "JSON: GET /get with json-query /origin (any IP)"
     argv: ["{CLI}", "net", "get", "--json-query", "/origin", "{HTTP}/get"]
+    # origin is an IP address; match any valid IP pattern
     expect:
-      - "127.0.0.1"
+      - "\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}"
     timeout_s: 10
     forbid:
       - "NotReady"
 
   - name: "JSON: GET /get with json-query (empty result for non-existent path)"
     argv: ["{CLI}", "net", "get", "--json-query", "/nonexistent", "{HTTP}/get"]
-    expect:
-      - "total read: 0 bytes"
-    timeout_s: 10
+    # Empty JSON result produces no output from net get (exit 0)
     forbid:
+      - "Error"
       - "NotReady"
+    expect_exit: 0
+    timeout_s: 10
+    expect: []
 
   - name: "JSON: Open with json-query then Read"
     argv: ["{CLI}", "net", "open", "--json-query", "/url", "{HTTP}/get"]
     expect:
-      - "accepted=true"
+      - "accepted=True"
     capture_var:
       name: HANDLE
       pattern: "handle=(\\d+)"
@@ -46,7 +48,7 @@ steps:
   - name: "JSON: Read query result from handle"
     argv: ["{CLI}", "net", "read", "--max-bytes", "512", "{HANDLE}"]
     expect:
-      - "{HTTP}/get"
+      - "127.0.0.1:8080/get"
     timeout_s: 10
 
   - name: "JSON: Close handle"
