@@ -1,5 +1,6 @@
 #include "fujinet/io/devices/network_device.h"
 
+#include "fujinet/core/logging.h"
 #include "fujinet/io/core/io_message.h"
 
 #include "fujinet/io/devices/net_codec.h"
@@ -601,6 +602,8 @@ IOResponse NetworkDevice::handle(const IORequest& request)
                 }
                 // Serve from cached jsonResult
                 const auto total = static_cast<std::uint32_t>(s->jsonResult.size());
+                FN_LOGD("net", "JSON Read handle=%u offset=%u total=%u maxBytes=%u",
+                    handle, offset, total, maxBytes);
                 if (offset > total) {
                     resp.status = StatusCode::InvalidRequest;
                     return resp;
@@ -799,6 +802,9 @@ IOResponse NetworkDevice::handle(const IORequest& request)
             // Set the JSON query path on the session
             s->jsonQuery.assign(queryView.data(), queryView.size());
 
+            FN_LOGD("net", "JsonQuery handle=%u path=\"%s\" bodyCached=%d bodySize=%zu",
+                handle, s->jsonQuery.c_str(), static_cast<int>(s->jsonBodyCached), s->jsonBodyBuffer.size());
+
             // Try to buffer full body if not already cached
             if (!s->jsonBodyCached) {
                 s->jsonBuffering = true;
@@ -841,14 +847,18 @@ IOResponse NetworkDevice::handle(const IORequest& request)
                     if (item) {
                         s->jsonResult = json_item_to_string(item);
                         s->jsonResultSize = static_cast<std::uint32_t>(s->jsonResult.size());
+                        FN_LOGD("net", "JsonQuery result handle=%u path=\"%s\" resultSize=%u result=\"%s\"",
+                            handle, s->jsonQuery.c_str(), s->jsonResultSize, s->jsonResult.c_str());
                     } else {
                         s->jsonResult.clear();
                         s->jsonResultSize = 0;
+                        FN_LOGD("net", "JsonQuery no match handle=%u path=\"%s\"", handle, s->jsonQuery.c_str());
                     }
                     cJSON_Delete(json);
                 } else {
                     s->jsonResult.clear();
                     s->jsonResultSize = 0;
+                    FN_LOGW("net", "JsonQuery parse error handle=%u path=\"%s\"", handle, s->jsonQuery.c_str());
                 }
                 s->jsonReady = true;
             }
