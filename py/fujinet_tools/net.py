@@ -337,13 +337,6 @@ def cmd_net_json_query(args) -> int:
             return 2
 
         result_available = bool(flags_byte & 0x01)
-
-        flags_byte, off = np.read_u8(pkt.payload, off)
-        _reserved, off = np.read_u16le(pkt.payload, off)
-        handle, off = np.read_u16le(pkt.payload, off)
-        result_size, off = np.read_u16le(pkt.payload, off)
-
-        result_available = bool(flags_byte & 0x01)
         print(
             f"handle={handle} result_available={result_available} result_size={result_size}"
         )
