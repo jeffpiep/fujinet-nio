@@ -1,43 +1,7 @@
 group: Network / JSON Query
 steps:
-  - name: "JSON: GET /get with json-query /url"
-    argv: ["{CLI}", "net", "get", "--json-query", "/url", "{HTTP}/get"]
-    expect:
-      - "127.0.0.1:8080/get"
-    timeout_s: 10
-    forbid:
-      - "Error"
-      - "NotReady"
-
-  - name: "JSON: GET /get with json-query /headers/Host"
-    argv: ["{CLI}", "net", "get", "--json-query", "/headers/Host", "{HTTP}/get"]
-    expect:
-      - "127.0.0.1:8080"
-    timeout_s: 10
-    forbid:
-      - "NotReady"
-
-  - name: "JSON: GET /get with json-query /origin (any IP)"
-    argv: ["{CLI}", "net", "get", "--json-query", "/origin", "{HTTP}/get"]
-    # origin is an IP address; match any valid IP pattern
-    expect:
-      - "\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}"
-    timeout_s: 10
-    forbid:
-      - "NotReady"
-
-  - name: "JSON: GET /get with json-query (empty result for non-existent path)"
-    argv: ["{CLI}", "net", "get", "--json-query", "/nonexistent", "{HTTP}/get"]
-    # Empty JSON result produces no output from net get (exit 0)
-    forbid:
-      - "Error"
-      - "NotReady"
-    expect_exit: 0
-    timeout_s: 10
-    expect: []
-
-  - name: "JSON: Open with json-query then Read"
-    argv: ["{CLI}", "net", "open", "--json-query", "/url", "{HTTP}/get"]
+  - name: "JSON: Open + json-query + read /url"
+    argv: ["{CLI}", "net", "open", "{HTTP}/get"]
     expect:
       - "accepted=True"
     capture_var:
@@ -45,10 +9,28 @@ steps:
       pattern: "handle=(\\d+)"
     timeout_s: 10
 
-  - name: "JSON: Read query result from handle"
+  - name: "JSON: json-query /url on handle"
+    argv: ["{CLI}", "net", "json-query", "--handle", "{HANDLE}", "--path", "/url"]
+    expect:
+      - "result_available=True"
+    timeout_s: 10
+
+  - name: "JSON: Read result"
     argv: ["{CLI}", "net", "read", "--max-bytes", "512", "{HANDLE}"]
     expect:
       - "127.0.0.1:8080/get"
+    timeout_s: 10
+
+  - name: "JSON: json-query /headers/Host on same handle"
+    argv: ["{CLI}", "net", "json-query", "--handle", "{HANDLE}", "--path", "/headers/Host"]
+    expect:
+      - "result_available=True"
+    timeout_s: 10
+
+  - name: "JSON: Read second result"
+    argv: ["{CLI}", "net", "read", "--max-bytes", "512", "{HANDLE}"]
+    expect:
+      - "127.0.0.1:8080"
     timeout_s: 10
 
   - name: "JSON: Close handle"

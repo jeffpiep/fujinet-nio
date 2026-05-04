@@ -33,6 +33,7 @@ CMD_WRITE = 0x03
 CMD_CLOSE = 0x04
 CMD_INFO = 0x05
 CMD_INFO_READ = 0x06
+CMD_JSON_QUERY = 0x07
 
 
 def _check_version(payload: bytes, off: int = 0) -> int:
@@ -50,7 +51,6 @@ def build_open_req(
     headers: Optional[List[Tuple[str, str]]] = None,
     body_len_hint: int = 0,
     response_headers: Optional[List[str]] = None,
-    json_query: Optional[str] = None,
 ) -> bytes:
     """
     v1 (updated):
@@ -60,8 +60,7 @@ def build_open_req(
       lp_u16 url
       u16 headerCount; repeated (lp_u16 key, lp_u16 value)
       u32 bodyLenHint
-      u16 respHeaderCount; repeated lp_u16 name
-      lp_u16 jsonQuery (optional, 0-length = no query)
+      u16 respHeaderCount; repeated lp_u16 name   <-- NEW (required)
     """
     if headers is None:
         headers = []
@@ -102,13 +101,6 @@ def build_open_req(
     for name in response_headers:
         nb = name.encode("utf-8")
         out += u16le(min(len(nb), 0xFFFF)) + nb[:0xFFFF]
-
-    # Optional JSON query (JSON Pointer path)
-    if json_query:
-        jq_b = json_query.encode("utf-8")
-        out += u16le(len(jq_b)) + jq_b
-    else:
-        out += u16le(0)  # no query
 
     return bytes(out)
 
@@ -214,6 +206,21 @@ def build_info_read_req(handle: int, offset: int, max_bytes: int) -> bytes:
     if not (0 <= max_bytes <= 0xFFFF):
         raise ValueError("max_bytes must fit u16")
     return bytes([NETPROTO_VERSION]) + u16le(handle) + u32le(offset) + u16le(max_bytes)
+
+
+def build_json_query_req(handle: int, json_query: str) -> bytes:
+    """
+    v1:
+      u8  version
+      u16 handle
+      lp_u16 jsonQuery (JSON Pointer path)
+    """
+    if not (0 <= handle <= 0xFFFF):
+        raise ValueError("handle must fit u16")
+    jq_b = json_query.encode("utf-8")
+    if len(jq_b) > 0xFFFF:
+        raise ValueError("json_query too long")
+    return bytes([NETPROTO_VERSION]) + u16le(handle) + u16le(len(jq_b)) + jq_b
 
 
 @dataclass

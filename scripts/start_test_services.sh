@@ -237,17 +237,14 @@ NGINX_EOF
 prepare_http_fs_content() {
   local fs_dir="/tmp/fujinet-http-fs"
   mkdir -p "$fs_dir/subdir"
+  mkdir -p "$fs_dir/bbc/tests"
 
   printf 'FUJINET HTTP FS TEST\n' > "$fs_dir/readme.txt"
   printf 'HTTP filesystem test payload\n' > "$fs_dir/subdir/note.txt"
 
-  if [ ! -f "$fs_dir/disk1.atr" ]; then
-    dd if=/dev/zero of="$fs_dir/disk1.atr" bs=16 count=720 >/dev/null 2>&1
-  fi
-
-  if [ ! -f "$fs_dir/disk2.ssd" ]; then
-    dd if=/dev/zero of="$fs_dir/disk2.ssd" bs=256 count=800 >/dev/null 2>&1
-  fi
+  # Integration tests content
+  printf '\x00\x05OLLEH' > "$fs_dir/bbc/tests/hello_print_hash.txt"
+  printf 'FujiNet OPENIN BGET Test\r\n' > "$fs_dir/bbc/tests/simple.txt"
 
   echo "$fs_dir"
 }

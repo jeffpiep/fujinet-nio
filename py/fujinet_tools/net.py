@@ -249,7 +249,6 @@ def cmd_net_open(args) -> int:
         headers=_collect_request_headers(args),
         body_len_hint=args.body_len_hint,
         response_headers=getattr(args, "resp_header", None) or [],
-        json_query=getattr(args, "json_query", None),
     )
 
     with open_serial(args.port, args.baud, timeout_s=0.01) as ser:
@@ -273,8 +272,6 @@ def cmd_net_open(args) -> int:
 
         orr = np.parse_open_resp(pkt.payload)
         extra = ""
-        if getattr(args, "json_query", None):
-            extra = f" json_query={args.json_query}"
         print(
             f"accepted={orr.accepted} needs_body_write={orr.needs_body_write} handle={orr.handle}{extra}"
         )
@@ -304,6 +301,52 @@ def cmd_net_close(args) -> int:
             return 1
 
         print("closed")
+        return 0
+
+
+def cmd_net_json_query(args) -> int:
+    req = np.build_json_query_req(args.handle, args.path)
+
+    with open_serial(args.port, args.baud, timeout_s=0.01) as ser:
+        bus = FujiBusSession().attach(ser, debug=args.debug)
+        pkt = _send_retry_not_ready(
+            bus=bus,
+            device=np.NETWORK_DEVICE_ID,
+            command=np.CMD_JSON_QUERY,
+            payload=req,
+            timeout=args.timeout,
+            retries=200,
+            sleep_s=0.05,
+        )
+        if pkt is None:
+            print("No response")
+            return 2
+        if not status_ok(pkt):
+            code = _pkt_status_code(pkt)
+            print(f"Device status={code} ({_status_str(code)})")
+            return 1
+
+        try:
+            off = np._check_version(pkt.payload, 0)
+            flags_byte, off = np.read_u8(pkt.payload, off)
+            _reserved, off = np.read_u16le(pkt.payload, off)
+            handle, off = np.read_u16le(pkt.payload, off)
+            result_size, off = np.read_u16le(pkt.payload, off)
+        except ValueError as e:
+            print(f"Parse error: {e}")
+            return 2
+
+        result_available = bool(flags_byte & 0x01)
+
+        flags_byte, off = np.read_u8(pkt.payload, off)
+        _reserved, off = np.read_u16le(pkt.payload, off)
+        handle, off = np.read_u16le(pkt.payload, off)
+        result_size, off = np.read_u16le(pkt.payload, off)
+
+        result_available = bool(flags_byte & 0x01)
+        print(
+            f"handle={handle} result_available={result_available} result_size={result_size}"
+        )
         return 0
 
 
@@ -468,7 +511,6 @@ def cmd_net_get(args) -> int:
             headers=_collect_request_headers(args),
             body_len_hint=0,
             response_headers=resp_headers,
-            json_query=getattr(args, "json_query", None),
         )
         pkt = _send_retry_not_ready(
             bus=bus,
@@ -737,7 +779,6 @@ def cmd_net_send(args) -> int:
                 else (body_len_hint if (args.method in (2, 3)) else 0)
             ),
             response_headers=resp_headers,
-            json_query=getattr(args, "json_query", None),
         )
 
         # OPEN
@@ -975,11 +1016,6 @@ def register_subcommands(subparsers) -> None:
         help="Expected request body length (POST/PUT)",
     )
     pno.add_argument(
-        "--json-query",
-        default=None,
-        help="JSON Pointer path (RFC 6901) for server-side JSON query. Response is the query result.",
-    )
-    pno.add_argument(
         "--resp-header",
         action="append",
         default=[],
@@ -1031,11 +1067,6 @@ def register_subcommands(subparsers) -> None:
         "--force", action="store_true", help="Overwrite --out if it exists"
     )
     png.add_argument("--show-headers", action="store_true")
-    png.add_argument(
-        "--json-query",
-        default=None,
-        help="JSON Pointer path (RFC 6901) for server-side JSON query",
-    )
     png.add_argument(
         "--resp-header",
         action="append",
@@ -1099,11 +1130,6 @@ def register_subcommands(subparsers) -> None:
     )
     pns.add_argument("--show-headers", action="store_true")
     pns.add_argument(
-        "--json-query",
-        default=None,
-        help="JSON Pointer path (RFC 6901) for server-side JSON query",
-    )
-    pns.add_argument(
         "--resp-header",
         action="append",
         default=[],
@@ -1150,5 +1176,12 @@ def register_subcommands(subparsers) -> None:
     )
     pns.add_argument("url")
     pns.set_defaults(fn=cmd_net_send)
+
+    # JSON Query subcommand: send a JSON Pointer path to query on an open handle
+    pjq = nsub.add_parser("json-query", help="Apply JSON Pointer query to an open network connection")
+    pjq.add_argument("--handle", type=int, required=True, help="Handle from net open")
+    pjq.add_argument("--path", required=True, help="JSON Pointer path (e.g. /url)")
+    pjq.add_argument("--timeout", type=float, default=10.0)
+    pjq.set_defaults(fn=cmd_net_json_query)
 
     net_tcp.register_tcp_subcommands(nsub)

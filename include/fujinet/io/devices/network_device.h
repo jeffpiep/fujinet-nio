@@ -63,6 +63,7 @@ private:
         std::string   jsonBodyBuffer;
         std::string   jsonResult;
         std::uint32_t jsonResultSize{0};
+        bool          jsonBodyCached{false};
         bool          jsonBuffering{false};
         bool          jsonReady{false};
     };
@@ -110,6 +111,7 @@ private:
         s.jsonBodyBuffer.clear();
         s.jsonResult.clear();
         s.jsonResultSize = 0;
+        s.jsonBodyCached = false;
         s.jsonBuffering = false;
         s.jsonReady = false;
     }
