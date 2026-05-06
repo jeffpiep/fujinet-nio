@@ -161,8 +161,10 @@ repeat respHeaderCount times:
   u16  nameLen         // LE
   u8[] name            // length nameLen (header name, ASCII; case-insensitive)
 
-u16  jsonQueryLen      // LE; 0 = no JSON query
-u8[] jsonQuery         // length jsonQueryLen (JSON Pointer path, e.g. "/value")
+u8   translationType   // 0=None, 1=Json, 2=Xml, 3=Rss
+u8   translationFlags  // translator-specific, 0 for now
+u16  selectorLen       // LE; 0 = no selector
+u8[] selector          // length selectorLen
 ```
 
 ### Open flags (u8)
@@ -215,27 +217,38 @@ Notes:
 - `needs_body_write=1` indicates the host must stream body via `Write` (POST/PUT).
 - `accepted=1` means the handle exists; it does not imply the request has completed.
 
-### JSON Query (v1 optional)
+### Content Translation (v1)
 
-A JSON Pointer path (RFC 6901) may be appended after the response header list:
+Open can optionally configure a translated response view. The transport backend still
+fetches raw bytes; the device applies translation before exposing data via `Read`.
+
+Wire fields:
 
 ```
-lp_u16 jsonQuery
+u8   translationType
+u8   translationFlags
+lp_u16 selector
 ```
 
-When `jsonQuery` is non-empty, the device:
-1. Fetches the full HTTP response body.
-2. Parses it with cJSON.
-3. Applies the JSON Pointer query via `cJSONUtils_GetPointer`.
-4. Serializes the matched value to a string.
-5. Makes the serialized result available via subsequent `Read` commands.
+Defined types:
+- `0` = `None`
+- `1` = `Json`
+- `2` = `Xml` (reserved, currently unsupported)
+- `3` = `Rss` (reserved, currently unsupported)
 
-If `jsonQuery` is empty (length 0), the device behaves as before (raw body streaming).
+For `Json`, `selector` is a JSON Pointer (RFC 6901), for example `/url`.
 
-When JSON query is active:
-- `Info` reports the query result size as `contentLength`, not the original body size.
-- `Read` returns data from the serialized query result.
-- During body buffering (full body not yet fetched), `Read`/`Info` return `NotReady`.
+When translation is active:
+1. The device buffers the full HTTP response body.
+2. It applies the selected translator to the cached body.
+3. `Read` returns translated bytes instead of raw response bytes.
+4. `Info` reports translated output size as `contentLength` while preserving transport metadata.
+
+If `translationType == None`, the device behaves as before and exposes the raw response body.
+
+When translation is active but the full body is not yet available, `Read` and `Info` return `NotReady`.
+
+Only JSON translation is implemented in this phase. Unsupported translation types must return `Unsupported`.
 
 Serialization format (intended to be simple for 8-bit hosts):
 - **String**: raw text content (no surrounding quotes)
@@ -607,6 +620,39 @@ TCP uses the same v1 commands (Open/Write/Read/Info/Close) but differs from HTTP
 - `Info()` uses `headerBytes` for **pseudo headers** that expose TCP state (connected, bytes available, last error, etc.).
 
 See `docs/network_device_tcp.md` for the full TCP mapping and pseudo header keys.
+
+---
+
+## Command: TranslateConfigure (0x07)
+
+Command `0x07` exposes the generic translation configuration path.
+
+### Request
+
+```
+u8   version
+u16  handle
+u8   translationType
+u8   translationFlags
+lp_u16 selector
+```
+
+### Response
+
+```
+u8   version
+u8   flags             // bit0=result available
+u16  reserved          // = 0
+u16  handle
+u32  translatedSize    // size of the translated result
+```
+
+### Semantics
+
+- Reconfigures the handle to use the requested translator and selector.
+- If the raw response body has already been cached, the device re-runs translation without refetching.
+- Subsequent `Read` calls return translated bytes for the active selector.
+- In the current implementation, `Json` is supported and `Xml`/`Rss` return `Unsupported`.
 
 ---
 

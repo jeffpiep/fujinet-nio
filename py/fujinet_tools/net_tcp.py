@@ -244,6 +244,8 @@ def tcp_open(
         headers=[],
         body_len_hint=0,
         response_headers=[],
+        translation_type=np.TRANSLATION_NONE,
+        translation_selector="",
     )
     pkt = _send_retry(
         bus=bus,

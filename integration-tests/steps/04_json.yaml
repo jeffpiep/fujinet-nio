@@ -1,18 +1,12 @@
 group: Network / JSON Query
 steps:
-  - name: "JSON: Open + json-query + read /url"
-    argv: ["{CLI}", "net", "open", "{HTTP}/get"]
+  - name: "JSON: Open translated view for /url"
+    argv: ["{CLI}", "net", "open", "--content-type", "json", "--selector", "/url", "{HTTP}/get"]
     expect:
       - "accepted=True"
     capture_var:
       name: HANDLE
       pattern: "handle=(\\d+)"
-    timeout_s: 10
-
-  - name: "JSON: json-query /url on handle"
-    argv: ["{CLI}", "net", "json-query", "--handle", "{HANDLE}", "--path", "/url"]
-    expect:
-      - "result_available=True"
     timeout_s: 10
 
   - name: "JSON: Read result"
@@ -21,8 +15,8 @@ steps:
       - "127.0.0.1:8080/get"
     timeout_s: 10
 
-  - name: "JSON: json-query /headers/Host on same handle"
-    argv: ["{CLI}", "net", "json-query", "--handle", "{HANDLE}", "--path", "/headers/Host"]
+  - name: "JSON: translate /headers/Host on same handle"
+    argv: ["{CLI}", "net", "translate", "--handle", "{HANDLE}", "--content-type", "json", "--selector", "/headers/Host"]
     expect:
       - "result_available=True"
     timeout_s: 10

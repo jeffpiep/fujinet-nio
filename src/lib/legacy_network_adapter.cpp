@@ -123,6 +123,9 @@ IORequest LegacyNetworkAdapter::make_open_req(const IORequest& legacyReq, Device
     netproto::write_u16le(payload, 0);         // headerCount
     netproto::write_u32le(payload, 0);         // bodyLenHint (legacy unknown)
     netproto::write_u16le(payload, 0);         // respHeaderCount
+    netproto::write_u8(payload, 0);            // translationType=None
+    netproto::write_u8(payload, 0);            // translationFlags
+    netproto::write_u16le(payload, 0);         // translationSelectorLen
 
     IORequest req = legacyReq;
     req.deviceId = to_device_id(WireDeviceId::NetworkService);
@@ -708,4 +711,3 @@ IOResponse LegacyNetworkAdapter::handleRequest(const IORequest& request)
 #else
 // Non-legacy build: intentionally empty.
 #endif
-

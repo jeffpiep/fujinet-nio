@@ -5,6 +5,7 @@
 idf_component_register(
     SRCS
 # __TARGET_SOURCES_START__
+        lib/json_content_translator.cpp
 # __TARGET_SOURCES_END__
         ../third_party/cjson/cJSON.c
         ../third_party/cjson/cJSON_Utils.c
@@ -24,4 +25,3 @@ idf_component_register(
 # PlatformIO/ESP-IDF builds already provide transport selection via compiler flags
 # (e.g. `-DFN_BUILD_ATARI_SIO`). We deliberately do not feature-gate sources in the
 # generated `src/CMakeLists.txt`; instead, code is gated by those compiler flags.
-

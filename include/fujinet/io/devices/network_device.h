@@ -1,8 +1,10 @@
 #pragma once
 
 #include "fujinet/io/devices/virtual_device.h"
+#include "fujinet/io/devices/content_translator.h"
 #include "fujinet/io/devices/network_protocol.h"
 #include "fujinet/io/devices/network_protocol_registry.h"
+#include "fujinet/io/devices/network_translation.h"
 
 #include <array>
 #include <cstdint>
@@ -58,14 +60,13 @@ private:
         bool          awaitingBody    = false; // gate Info/Read until body complete
         bool          bodyLenUnknown  = false; // unknown-length body; committed by zero-length Write()
 
-        // JSON query state
-        std::string   jsonQuery;
-        std::string   jsonBodyBuffer;
-        std::string   jsonResult;
-        std::uint32_t jsonResultSize{0};
-        bool          jsonBodyCached{false};
-        bool          jsonBuffering{false};
-        bool          jsonReady{false};
+        TranslationConfig translation;
+        std::unique_ptr<IContentTranslator> translator;
+        std::string responseBodyCache;
+        bool responseBodyCached{false};
+        bool responseBodyBuffering{false};
+        bool translationReady{false};
+        std::uint64_t translatedResultSize{0};
     };
 
     std::array<Session, MAX_SESSIONS> _sessions{};
@@ -107,13 +108,13 @@ private:
         s.createdTick = 0;
         s.lastActivityTick = 0;
         s.completed = false;
-        s.jsonQuery.clear();
-        s.jsonBodyBuffer.clear();
-        s.jsonResult.clear();
-        s.jsonResultSize = 0;
-        s.jsonBodyCached = false;
-        s.jsonBuffering = false;
-        s.jsonReady = false;
+        s.translation = TranslationConfig{};
+        s.translator.reset();
+        s.responseBodyCache.clear();
+        s.responseBodyCached = false;
+        s.responseBodyBuffering = false;
+        s.translationReady = false;
+        s.translatedResultSize = 0;
     }
 
     // Pick a victim to evict (LRU) if we want to recover from leaky clients.
@@ -130,6 +131,15 @@ private:
         }
         return victim;
     }
+
+    static bool translation_enabled(const Session& s) noexcept;
+    static std::unique_ptr<IContentTranslator> make_translator(ContentTranslationType type);
+    static void reset_translation(Session& s) noexcept;
+
+    StatusCode configure_translation(Session& s, const TranslationConfig& config);
+    StatusCode buffer_translation_body(Session& s);
+    StatusCode finalize_translation(Session& s);
+    StatusCode ensure_translation_ready(Session& s);
 
 };
 

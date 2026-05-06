@@ -33,7 +33,12 @@ CMD_WRITE = 0x03
 CMD_CLOSE = 0x04
 CMD_INFO = 0x05
 CMD_INFO_READ = 0x06
-CMD_JSON_QUERY = 0x07
+CMD_TRANSLATE_CONFIGURE = 0x07
+
+TRANSLATION_NONE = 0
+TRANSLATION_JSON = 1
+TRANSLATION_XML = 2
+TRANSLATION_RSS = 3
 
 
 def _check_version(payload: bytes, off: int = 0) -> int:
@@ -51,6 +56,9 @@ def build_open_req(
     headers: Optional[List[Tuple[str, str]]] = None,
     body_len_hint: int = 0,
     response_headers: Optional[List[str]] = None,
+    translation_type: int = TRANSLATION_NONE,
+    translation_flags: int = 0,
+    translation_selector: str = "",
 ) -> bytes:
     """
     v1 (updated):
@@ -60,7 +68,10 @@ def build_open_req(
       lp_u16 url
       u16 headerCount; repeated (lp_u16 key, lp_u16 value)
       u32 bodyLenHint
-      u16 respHeaderCount; repeated lp_u16 name   <-- NEW (required)
+      u16 respHeaderCount; repeated lp_u16 name
+      u8  translationType
+      u8  translationFlags
+      lp_u16 translationSelector
     """
     if headers is None:
         headers = []
@@ -78,6 +89,14 @@ def build_open_req(
         raise ValueError("body_len_hint must fit u32")
     if len(response_headers) > 0xFFFF:
         raise ValueError("too many response headers")
+    if not (0 <= translation_type <= 0xFF):
+        raise ValueError("translation_type must fit u8")
+    if not (0 <= translation_flags <= 0xFF):
+        raise ValueError("translation_flags must fit u8")
+
+    selector_b = translation_selector.encode("utf-8")
+    if len(selector_b) > 0xFFFF:
+        raise ValueError("translation_selector too long")
 
     out = bytearray()
     out.append(NETPROTO_VERSION)
@@ -101,6 +120,10 @@ def build_open_req(
     for name in response_headers:
         nb = name.encode("utf-8")
         out += u16le(min(len(nb), 0xFFFF)) + nb[:0xFFFF]
+
+    out.append(translation_type & 0xFF)
+    out.append(translation_flags & 0xFF)
+    out += u16le(len(selector_b)) + selector_b
 
     return bytes(out)
 
@@ -206,21 +229,53 @@ def build_info_read_req(handle: int, offset: int, max_bytes: int) -> bytes:
     if not (0 <= max_bytes <= 0xFFFF):
         raise ValueError("max_bytes must fit u16")
     return bytes([NETPROTO_VERSION]) + u16le(handle) + u32le(offset) + u16le(max_bytes)
-
-
-def build_json_query_req(handle: int, json_query: str) -> bytes:
-    """
-    v1:
-      u8  version
-      u16 handle
-      lp_u16 jsonQuery (JSON Pointer path)
-    """
+def build_translate_configure_req(
+    handle: int,
+    *,
+    translation_type: int,
+    translation_flags: int = 0,
+    translation_selector: str = "",
+) -> bytes:
     if not (0 <= handle <= 0xFFFF):
         raise ValueError("handle must fit u16")
-    jq_b = json_query.encode("utf-8")
-    if len(jq_b) > 0xFFFF:
-        raise ValueError("json_query too long")
-    return bytes([NETPROTO_VERSION]) + u16le(handle) + u16le(len(jq_b)) + jq_b
+    if not (0 <= translation_type <= 0xFF):
+        raise ValueError("translation_type must fit u8")
+    if not (0 <= translation_flags <= 0xFF):
+        raise ValueError("translation_flags must fit u8")
+
+    selector_b = translation_selector.encode("utf-8")
+    if len(selector_b) > 0xFFFF:
+        raise ValueError("translation_selector too long")
+
+    return (
+        bytes([NETPROTO_VERSION])
+        + u16le(handle)
+        + bytes([translation_type & 0xFF, translation_flags & 0xFF])
+        + u16le(len(selector_b))
+        + selector_b
+    )
+
+
+@dataclass
+class TranslateConfigureResp:
+    ready: bool
+    handle: int
+    translated_size: int
+
+
+def parse_translate_configure_resp(payload: bytes) -> TranslateConfigureResp:
+    off = _check_version(payload, 0)
+    flags, off = read_u8(payload, off)
+    _reserved, off = read_u16le(payload, off)
+    handle, off = read_u16le(payload, off)
+    translated_size, off = read_u32le(payload, off)
+    if off != len(payload):
+        raise ValueError("trailing bytes in translate-configure response")
+    return TranslateConfigureResp(
+        ready=bool(flags & 0x01),
+        handle=handle,
+        translated_size=translated_size,
+    )
 
 
 @dataclass

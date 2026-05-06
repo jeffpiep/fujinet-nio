@@ -42,6 +42,7 @@ idf_component_register(
         lib/fujinet_init.cpp
         lib/io_device_manager.cpp
         lib/io_service.cpp
+        lib/json_content_translator.cpp
         lib/legacy_network_adapter.cpp
         lib/modem_device.cpp
         lib/modem_device_init.cpp
@@ -134,4 +135,3 @@ idf_component_register(
 # PlatformIO/ESP-IDF builds already provide transport selection via compiler flags
 # (e.g. `-DFN_BUILD_ATARI_SIO`). We deliberately do not feature-gate sources in the
 # generated `src/CMakeLists.txt`; instead, code is gated by those compiler flags.
-

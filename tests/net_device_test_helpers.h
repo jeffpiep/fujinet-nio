@@ -10,6 +10,7 @@
 
 #include "fujinet/io/core/io_message.h"
 #include "fujinet/io/devices/net_codec.h"
+#include "fujinet/io/devices/network_translation.h"
 #include "fujinet/io/devices/network_device.h"
 #include "fujinet/io/devices/network_protocol_registry.h"
 #include "fujinet/io/devices/network_protocol_stub.h"
@@ -49,7 +50,10 @@ inline std::uint16_t open_handle_stub(
     std::uint8_t method = 1, // GET
     std::uint8_t flags = 0,
     std::uint32_t bodyLenHint = 0,
-    std::initializer_list<std::string_view> responseHeaders = {}
+    std::initializer_list<std::string_view> responseHeaders = {},
+    fujinet::io::ContentTranslationType translationType = fujinet::io::ContentTranslationType::None,
+    std::string_view translationSelector = {},
+    std::uint8_t translationFlags = 0
 ) {
     std::string p;
     netproto::write_u8(p, V);       // version
@@ -65,6 +69,10 @@ inline std::uint16_t open_handle_stub(
     for (auto h : responseHeaders) {
         netproto::write_lp_u16_string(p, h);
     }
+
+    netproto::write_u8(p, static_cast<std::uint8_t>(translationType));
+    netproto::write_u8(p, translationFlags);
+    netproto::write_lp_u16_string(p, translationSelector);
 
     IORequest req{};
     req.id = 100;
@@ -205,6 +213,9 @@ static std::uint16_t send_open(NetworkDevice& dev, std::uint16_t deviceId, const
     netproto::write_u32le(p, 0); // bodyLenHint
 
     // NEW: response header allowlist = empty (store none)
+    netproto::write_u16le(p, 0);
+    netproto::write_u8(p, static_cast<std::uint8_t>(fujinet::io::ContentTranslationType::None));
+    netproto::write_u8(p, 0);
     netproto::write_u16le(p, 0);
 
     IORequest req{};

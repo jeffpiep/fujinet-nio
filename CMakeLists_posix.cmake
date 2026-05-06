@@ -135,6 +135,7 @@ target_sources(fujinet-nio
         src/lib/fujinet_init.cpp
         src/lib/io_device_manager.cpp
         src/lib/io_service.cpp
+        src/lib/json_content_translator.cpp
         src/lib/legacy_network_adapter.cpp
         src/lib/modem_device.cpp
         src/lib/modem_device_init.cpp

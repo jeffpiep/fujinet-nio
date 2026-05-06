@@ -291,6 +291,9 @@ TEST_CASE("NetworkDevice v1: Write (POST) returns writtenLen via stub backend")
         netproto::write_u16le(p, 0); // headerCount
         netproto::write_u32le(p, 4); // bodyLenHint
         netproto::write_u16le(p, 0); // respHeaderCount (store no response headers)
+        netproto::write_u8(p, 0); // translationType=None
+        netproto::write_u8(p, 0); // translationFlags
+        netproto::write_u16le(p, 0); // translationSelector len
 
         IORequest req{};
         req.id = 10;
@@ -444,6 +447,9 @@ TEST_CASE("Conformance: Open malformed URL => InvalidRequest")
     netproto::write_u16le(p, 0);
     netproto::write_u32le(p, 0);
     netproto::write_u16le(p, 0); // respHeaderCount (store no response headers)
+    netproto::write_u8(p, 0); // translationType=None
+    netproto::write_u8(p, 0); // translationFlags
+    netproto::write_u16le(p, 0); // translationSelector len
 
     IORequest req{};
     req.id = 600;
@@ -470,6 +476,9 @@ TEST_CASE("Conformance: Open unsupported scheme => Unsupported")
     netproto::write_u16le(p, 0);
     netproto::write_u32le(p, 0);
     netproto::write_u16le(p, 0); // respHeaderCount (store no response headers)
+    netproto::write_u8(p, 0); // translationType=None
+    netproto::write_u8(p, 0); // translationFlags
+    netproto::write_u16le(p, 0); // translationSelector len
 
     IORequest req{};
     req.id = 700;
@@ -504,6 +513,9 @@ TEST_CASE("Conformance: capacity strict (allow_evict=0) => 5th Open returns Devi
     netproto::write_u16le(p, 0);
     netproto::write_u32le(p, 0);
     netproto::write_u16le(p, 0); // respHeaderCount (store no response headers)
+    netproto::write_u8(p, 0); // translationType=None
+    netproto::write_u8(p, 0); // translationFlags
+    netproto::write_u16le(p, 0); // translationSelector len
 
     IORequest req{};
     req.id = 999;
@@ -616,6 +628,9 @@ TEST_CASE("HTTP body lifecycle: bodyLenHint>0 on non-POST/PUT => InvalidRequest"
     netproto::write_u16le(p, 0);
     netproto::write_u32le(p, 4); // bodyLenHint on GET => InvalidRequest
     netproto::write_u16le(p, 0); // respHeaderCount (store no response headers)
+    netproto::write_u8(p, 0); // translationType=None
+    netproto::write_u8(p, 0); // translationFlags
+    netproto::write_u16le(p, 0); // translationSelector len
 
     IORequest req{};
     req.id = 1234;
@@ -625,4 +640,152 @@ TEST_CASE("HTTP body lifecycle: bodyLenHint>0 on non-POST/PUT => InvalidRequest"
 
     IOResponse resp = dev.handle(req);
     CHECK(resp.status == StatusCode::InvalidRequest);
+}
+
+TEST_CASE("NetworkDevice v1: Open-time JSON translation returns translated view")
+{
+    auto reg = make_stub_registry_http_only();
+    NetworkDevice dev(std::move(reg));
+    const auto deviceId = to_device_id(WireDeviceId::NetworkService);
+
+    const std::uint16_t handle = open_handle_stub(
+        dev,
+        deviceId,
+        "http://example.com/json",
+        /*method=*/1,
+        /*flags=*/0,
+        /*bodyLenHint=*/0,
+        {},
+        fujinet::io::ContentTranslationType::Json,
+        "/url");
+
+    IOResponse iresp = info_req(dev, deviceId, handle);
+    REQUIRE(iresp.status == StatusCode::Ok);
+    netproto::Reader ir(iresp.payload.data(), iresp.payload.size());
+
+    std::uint8_t iver = 0, iflags = 0;
+    std::uint16_t ires = 0, ihandle = 0, httpStatus = 0;
+    std::uint64_t contentLength = 0;
+    std::uint32_t hdrLen = 0;
+
+    REQUIRE(ir.read_u8(iver));
+    REQUIRE(ir.read_u8(iflags));
+    REQUIRE(ir.read_u16le(ires));
+    REQUIRE(ir.read_u16le(ihandle));
+    REQUIRE(ir.read_u16le(httpStatus));
+    REQUIRE(ir.read_u64le(contentLength));
+    REQUIRE(ir.read_u32le(hdrLen));
+
+    CHECK(ihandle == handle);
+    CHECK(httpStatus == 200);
+    CHECK(contentLength == std::string("http://example.com/json").size());
+
+    IOResponse rresp = read_req(dev, deviceId, handle, 0, 128);
+    REQUIRE(rresp.status == StatusCode::Ok);
+    netproto::Reader rr(rresp.payload.data(), rresp.payload.size());
+
+    std::uint8_t rver = 0, rflags = 0;
+    std::uint16_t rres = 0, rhandle = 0;
+    std::uint32_t offEcho = 0;
+    std::uint16_t dataLen = 0;
+
+    REQUIRE(rr.read_u8(rver));
+    REQUIRE(rr.read_u8(rflags));
+    REQUIRE(rr.read_u16le(rres));
+    REQUIRE(rr.read_u16le(rhandle));
+    REQUIRE(rr.read_u32le(offEcho));
+    REQUIRE(rr.read_u16le(dataLen));
+
+    const std::uint8_t* dataPtr = nullptr;
+    REQUIRE(rr.read_bytes(dataPtr, dataLen));
+    std::string body(reinterpret_cast<const char*>(dataPtr), dataLen);
+
+    CHECK(rhandle == handle);
+    CHECK(body == "http://example.com/json");
+    CHECK((rflags & 0x01) != 0);
+    CHECK(close_req(dev, deviceId, handle).status == StatusCode::Ok);
+}
+
+TEST_CASE("NetworkDevice v1: JSON compatibility command reuses cached body")
+{
+    auto reg = make_stub_registry_http_only();
+    NetworkDevice dev(std::move(reg));
+    const auto deviceId = to_device_id(WireDeviceId::NetworkService);
+
+    const std::uint16_t handle = open_handle_stub(dev, deviceId, "http://example.com/json");
+
+    std::string qp;
+    netproto::write_u8(qp, V);
+    netproto::write_u16le(qp, handle);
+    netproto::write_u8(qp, 1); // translationType=Json
+    netproto::write_u8(qp, 0); // translationFlags
+    netproto::write_lp_u16_string(qp, "/url");
+
+    IORequest qreq{};
+    qreq.id = 900;
+    qreq.deviceId = deviceId;
+    qreq.command = 0x07;
+    qreq.payload = to_vec(qp);
+
+    IOResponse qresp = dev.handle(qreq);
+    REQUIRE(qresp.status == StatusCode::Ok);
+
+    netproto::Reader qr(qresp.payload.data(), qresp.payload.size());
+    std::uint8_t qver = 0, qflags = 0;
+    std::uint16_t qres = 0, qhandle = 0;
+    std::uint32_t qsize = 0;
+    REQUIRE(qr.read_u8(qver));
+    REQUIRE(qr.read_u8(qflags));
+    REQUIRE(qr.read_u16le(qres));
+    REQUIRE(qr.read_u16le(qhandle));
+    REQUIRE(qr.read_u32le(qsize));
+    CHECK((qflags & 0x01) != 0);
+    CHECK(qhandle == handle);
+    CHECK(qsize == std::string("http://example.com/json").size());
+
+    IOResponse firstRead = read_req(dev, deviceId, handle, 0, 128);
+    REQUIRE(firstRead.status == StatusCode::Ok);
+    netproto::Reader firstR(firstRead.payload.data(), firstRead.payload.size());
+    std::uint8_t frVer = 0, frFlags = 0;
+    std::uint16_t frRes = 0, frHandle = 0, frLen = 0;
+    std::uint32_t frOff = 0;
+    REQUIRE(firstR.read_u8(frVer));
+    REQUIRE(firstR.read_u8(frFlags));
+    REQUIRE(firstR.read_u16le(frRes));
+    REQUIRE(firstR.read_u16le(frHandle));
+    REQUIRE(firstR.read_u32le(frOff));
+    REQUIRE(firstR.read_u16le(frLen));
+    const std::uint8_t* firstPtr = nullptr;
+    REQUIRE(firstR.read_bytes(firstPtr, frLen));
+    CHECK(std::string(reinterpret_cast<const char*>(firstPtr), frLen) == "http://example.com/json");
+
+    std::string qp2;
+    netproto::write_u8(qp2, V);
+    netproto::write_u16le(qp2, handle);
+    netproto::write_u8(qp2, 1); // translationType=Json
+    netproto::write_u8(qp2, 0); // translationFlags
+    netproto::write_lp_u16_string(qp2, "/headers/Host");
+
+    qreq.id = 901;
+    qreq.payload = to_vec(qp2);
+    qresp = dev.handle(qreq);
+    REQUIRE(qresp.status == StatusCode::Ok);
+
+    IOResponse rresp = read_req(dev, deviceId, handle, 0, 128);
+    REQUIRE(rresp.status == StatusCode::Ok);
+    netproto::Reader secondR(rresp.payload.data(), rresp.payload.size());
+    std::uint8_t srVer = 0, srFlags = 0;
+    std::uint16_t srRes = 0, srHandle = 0, srLen = 0;
+    std::uint32_t srOff = 0;
+    REQUIRE(secondR.read_u8(srVer));
+    REQUIRE(secondR.read_u8(srFlags));
+    REQUIRE(secondR.read_u16le(srRes));
+    REQUIRE(secondR.read_u16le(srHandle));
+    REQUIRE(secondR.read_u32le(srOff));
+    REQUIRE(secondR.read_u16le(srLen));
+    const std::uint8_t* secondPtr = nullptr;
+    REQUIRE(secondR.read_bytes(secondPtr, srLen));
+    CHECK(std::string(reinterpret_cast<const char*>(secondPtr), srLen) == "example.com");
+
+    CHECK(close_req(dev, deviceId, handle).status == StatusCode::Ok);
 }

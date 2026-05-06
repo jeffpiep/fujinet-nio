@@ -2,20 +2,15 @@
 
 #include "fujinet/core/logging.h"
 #include "fujinet/io/core/io_message.h"
+#include "fujinet/io/devices/json_content_translator.h"
 
 #include "fujinet/io/devices/net_codec.h"
 #include "fujinet/io/devices/net_commands.h"
 #include "fujinet/io/devices/network_protocol.h"
 #include "fujinet/io/devices/network_protocol_registry.h"
 
-#include "cJSON.h"
-#include "cJSON_Utils.h"
-
 #include <algorithm>
 #include <cctype>
-#include <cmath>
-#include <iomanip>
-#include <sstream>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -104,53 +99,196 @@ static bool check_version(Reader& r, std::uint8_t expected)
     return r.read_u8(ver) && ver == expected;
 }
 
-static bool is_approx_integer(double v)
+static bool read_translation_type(Reader& r, ContentTranslationType& type)
 {
-    double i = 0.0;
-    return std::modf(v, &i) == 0.0 && v >= -9007199254740992.0 && v <= 9007199254740992.0;
-}
-
-static std::string json_item_to_string(cJSON* item)
-{
-    if (!item) return {};
-
-    std::ostringstream ss;
-
-    if (cJSON_IsString(item)) {
-        char* s = cJSON_GetStringValue(item);
-        if (s) ss << s;
-    } else if (cJSON_IsBool(item)) {
-        ss << (cJSON_IsTrue(item) ? "TRUE" : "FALSE");
-    } else if (cJSON_IsNull(item)) {
-        ss << "NULL";
-    } else if (cJSON_IsNumber(item)) {
-        double num = cJSON_GetNumberValue(item);
-        if (is_approx_integer(num)) {
-            ss << static_cast<int64_t>(num);
-        } else {
-            ss << std::setprecision(10) << num;
-        }
-    } else if (cJSON_IsObject(item)) {
-        cJSON* child = item->child;
-        if (child) {
-            do {
-                ss << child->string << "\n" << json_item_to_string(child);
-                if (child->next) ss << "\n";
-            } while ((child = child->next) != nullptr);
-        }
-    } else if (cJSON_IsArray(item)) {
-        cJSON* child = item->child;
-        bool first = true;
-        if (child) {
-            do {
-                if (!first) ss << "\n";
-                ss << json_item_to_string(child);
-                first = false;
-            } while ((child = child->next) != nullptr);
-        }
+    std::uint8_t raw = 0;
+    if (!r.read_u8(raw)) {
+        return false;
     }
 
-    return ss.str();
+    type = static_cast<ContentTranslationType>(raw);
+    return true;
+}
+
+static bool read_translation_config(Reader& r, TranslationConfig& config)
+{
+    config = TranslationConfig{};
+
+    if (!read_translation_type(r, config.type)) {
+        return false;
+    }
+
+    if (!r.read_u8(config.flags)) {
+        return false;
+    }
+
+    std::string_view selector;
+    if (!r.read_lp_u16_string(selector)) {
+        return false;
+    }
+
+    config.selector.assign(selector.data(), selector.size());
+    return true;
+}
+
+bool NetworkDevice::translation_enabled(const Session& s) noexcept
+{
+    return s.translation.enabled() && static_cast<bool>(s.translator);
+}
+
+std::unique_ptr<IContentTranslator> NetworkDevice::make_translator(ContentTranslationType type)
+{
+    switch (type) {
+        case ContentTranslationType::None:
+            return nullptr;
+        case ContentTranslationType::Json:
+            return std::make_unique<JsonContentTranslator>();
+        case ContentTranslationType::Xml:
+        case ContentTranslationType::Rss:
+            return nullptr;
+    }
+
+    return nullptr;
+}
+
+void NetworkDevice::reset_translation(Session& s) noexcept
+{
+    s.translation = TranslationConfig{};
+    if (s.translator) {
+        s.translator->reset();
+    }
+    s.translator.reset();
+    s.responseBodyCache.clear();
+    s.responseBodyCached = false;
+    s.responseBodyBuffering = false;
+    s.translationReady = false;
+    s.translatedResultSize = 0;
+}
+
+StatusCode NetworkDevice::configure_translation(Session& s, const TranslationConfig& config)
+{
+    if (!is_known_translation_type(config.type)) {
+        return StatusCode::InvalidRequest;
+    }
+
+    std::string cachedBody;
+    const bool hadCachedBody = s.responseBodyCached;
+    if (hadCachedBody) {
+        cachedBody = std::move(s.responseBodyCache);
+    }
+
+    reset_translation(s);
+
+    if (hadCachedBody) {
+        s.responseBodyCache = std::move(cachedBody);
+        s.responseBodyCached = true;
+    }
+
+    if (!config.enabled()) {
+        return StatusCode::Ok;
+    }
+
+    auto translator = make_translator(config.type);
+    if (!translator) {
+        return StatusCode::Unsupported;
+    }
+
+    const StatusCode st = translator->configure(config);
+    if (st != StatusCode::Ok) {
+        return st;
+    }
+
+    s.translation = config;
+    s.translator = std::move(translator);
+    return StatusCode::Ok;
+}
+
+StatusCode NetworkDevice::buffer_translation_body(Session& s)
+{
+    if (!translation_enabled(s)) {
+        return StatusCode::InvalidRequest;
+    }
+
+    if (s.responseBodyCached) {
+        return StatusCode::Ok;
+    }
+
+    s.responseBodyBuffering = true;
+    std::uint8_t tmp[4096];
+
+    while (true) {
+        std::uint16_t chunk = 0;
+        bool chunkEof = false;
+        const StatusCode st = s.proto->read_body(
+            static_cast<std::uint32_t>(s.responseBodyCache.size()),
+            tmp,
+            sizeof(tmp),
+            chunk,
+            chunkEof);
+        if (st != StatusCode::Ok) {
+            s.responseBodyBuffering = false;
+            return st;
+        }
+
+        if (chunk > 0) {
+            s.responseBodyCache.append(reinterpret_cast<const char*>(tmp), chunk);
+        }
+
+        if (chunkEof) {
+            s.responseBodyCached = true;
+            s.responseBodyBuffering = false;
+            return StatusCode::Ok;
+        }
+
+        if (chunk == 0) {
+            s.responseBodyBuffering = false;
+            return StatusCode::NotReady;
+        }
+    }
+}
+
+StatusCode NetworkDevice::finalize_translation(Session& s)
+{
+    if (!translation_enabled(s)) {
+        return StatusCode::InvalidRequest;
+    }
+
+    s.translator->reset();
+    const StatusCode appendSt = s.translator->append_body(
+        reinterpret_cast<const std::uint8_t*>(s.responseBodyCache.data()),
+        s.responseBodyCache.size());
+    if (appendSt != StatusCode::Ok) {
+        s.translationReady = false;
+        return appendSt;
+    }
+
+    const StatusCode finalizeSt = s.translator->finalize();
+    if (finalizeSt != StatusCode::Ok) {
+        s.translationReady = false;
+        return finalizeSt;
+    }
+
+    s.translatedResultSize = s.translator->translated_size();
+    s.translationReady = true;
+    return StatusCode::Ok;
+}
+
+StatusCode NetworkDevice::ensure_translation_ready(Session& s)
+{
+    if (!translation_enabled(s)) {
+        return StatusCode::Ok;
+    }
+
+    if (s.translationReady) {
+        return StatusCode::Ok;
+    }
+
+    const StatusCode bufferSt = buffer_translation_body(s);
+    if (bufferSt != StatusCode::Ok) {
+        return bufferSt;
+    }
+
+    return finalize_translation(s);
 }
 
 IOResponse NetworkDevice::handle(const IORequest& request)
@@ -237,7 +375,18 @@ IOResponse NetworkDevice::handle(const IORequest& request)
                 respHeaderNamesLower.emplace_back(to_lower_ascii(name));
             }
 
+            TranslationConfig translation;
+            if (!read_translation_config(r, translation)) {
+                resp.status = StatusCode::InvalidRequest;
+                return resp;
+            }
+
             if (r.remaining() != 0) {
+                resp.status = StatusCode::InvalidRequest;
+                return resp;
+            }
+
+            if (!is_known_translation_type(translation.type)) {
                 resp.status = StatusCode::InvalidRequest;
                 return resp;
             }
@@ -300,6 +449,7 @@ IOResponse NetworkDevice::handle(const IORequest& request)
                     s.nextBodyOffset  = 0;
                     s.awaitingBody    = false;
                     s.bodyLenUnknown  = false;
+                    reset_translation(s);
                     if (s.proto) {
                         s.proto->close();
                         s.proto.reset();
@@ -355,6 +505,13 @@ IOResponse NetworkDevice::handle(const IORequest& request)
             slot->nextBodyOffset  = 0;
             slot->awaitingBody    = needsBodyWrite;
             slot->bodyLenUnknown  = bodyLenUnknown;
+
+            const StatusCode translationSt = configure_translation(*slot, translation);
+            if (translationSt != StatusCode::Ok) {
+                close_and_free(*slot);
+                resp.status = translationSt;
+                return resp;
+            }
 
             touch(*slot);
         
@@ -452,10 +609,12 @@ IOResponse NetworkDevice::handle(const IORequest& request)
                 return resp;
             }
 
-            // JSON query mode: if still buffering, not ready
-            if (!s->jsonQuery.empty() && !s->jsonReady) {
-                resp.status = StatusCode::NotReady;
-                return resp;
+            if (translation_enabled(*s)) {
+                const StatusCode translationSt = ensure_translation_ready(*s);
+                if (translationSt != StatusCode::Ok) {
+                    resp.status = translationSt;
+                    return resp;
+                }
             }
 
             NetworkInfo info{};
@@ -471,10 +630,10 @@ IOResponse NetworkDevice::handle(const IORequest& request)
             if (hdrLen > 0) flags |= 0x01;
             if (info.hasHttpStatus) flags |= 0x04;
 
-            // For JSON queries, report the query result size instead of original body size
-            if (!s->jsonQuery.empty() && s->jsonReady) {
+            // Translation view overrides body length while preserving transport metadata.
+            if (translation_enabled(*s) && s->translationReady) {
                 flags |= 0x02; // hasContentLength
-                info.contentLength = s->jsonResultSize;
+                info.contentLength = s->translatedResultSize;
                 info.hasContentLength = true;
             } else if (info.hasContentLength) {
                 flags |= 0x02;
@@ -593,24 +752,23 @@ IOResponse NetworkDevice::handle(const IORequest& request)
             std::string out;
             std::uint8_t flags = 0;
 
-            // JSON query mode: serve from cached jsonResult
-            if (!s->jsonQuery.empty()) {
-                if (!s->jsonReady) {
-                    // JSON query set but result not ready yet
-                    resp.status = StatusCode::NotReady;
+            if (translation_enabled(*s)) {
+                const StatusCode translationSt = ensure_translation_ready(*s);
+                if (translationSt != StatusCode::Ok) {
+                    resp.status = translationSt;
                     return resp;
                 }
-                // Serve from cached jsonResult
-                const auto total = static_cast<std::uint32_t>(s->jsonResult.size());
-                FN_LOGD("net", "JSON Read handle=%u offset=%u total=%u maxBytes=%u",
-                    handle, offset, total, maxBytes);
-                if (offset > total) {
-                    resp.status = StatusCode::InvalidRequest;
+
+                std::vector<std::uint8_t> translatedBuf(maxBytes);
+                const StatusCode st = s->translator->read(offset,
+                                                          translatedBuf.data(),
+                                                          translatedBuf.size(),
+                                                          n,
+                                                          eof);
+                if (st != StatusCode::Ok) {
+                    resp.status = st;
                     return resp;
                 }
-                const auto remaining = total - offset;
-                n = static_cast<std::uint16_t>(std::min<std::uint32_t>(remaining, maxBytes));
-                eof = (offset + n >= total);
 
                 out.reserve(1 + 1 + 2 + 2 + 4 + 2 + n);
                 if (eof) {
@@ -625,14 +783,13 @@ IOResponse NetworkDevice::handle(const IORequest& request)
                 netproto::write_u32le(out, offset);
                 netproto::write_u16le(out, n);
                 if (n > 0) {
-                    netproto::write_bytes(out,
-                        reinterpret_cast<const std::uint8_t*>(s->jsonResult.data() + offset), n);
+                    netproto::write_bytes(out, translatedBuf.data(), n);
                 }
                 resp.payload = to_vec(out);
                 return resp;
             }
 
-            // Normal (non-JSON) read path
+            // Normal (non-translated) read path
             {
                 std::vector<std::uint8_t> buf;
                 buf.resize(maxBytes);
@@ -767,7 +924,7 @@ IOResponse NetworkDevice::handle(const IORequest& request)
             return resp;
         }
 
-        case NetworkCommand::JsonQuery: {
+        case NetworkCommand::TranslateConfigure: {
             auto resp = make_success_response(request);
             Reader r(request.payload.data(), request.payload.size());
             if (!check_version(r, NETPROTO_VERSION)) {
@@ -777,12 +934,6 @@ IOResponse NetworkDevice::handle(const IORequest& request)
 
             std::uint16_t handle = 0;
             if (!r.read_u16le(handle)) {
-                resp.status = StatusCode::InvalidRequest;
-                return resp;
-            }
-
-            std::string_view queryView;
-            if (!r.read_lp_u16_string(queryView) || r.remaining() != 0) {
                 resp.status = StatusCode::InvalidRequest;
                 return resp;
             }
@@ -799,75 +950,38 @@ IOResponse NetworkDevice::handle(const IORequest& request)
                 return resp;
             }
 
-            // Set the JSON query path on the session
-            s->jsonQuery.assign(queryView.data(), queryView.size());
-
-            FN_LOGD("net", "JsonQuery handle=%u path=\"%s\" bodyCached=%d bodySize=%zu",
-                handle, s->jsonQuery.c_str(), static_cast<int>(s->jsonBodyCached), s->jsonBodyBuffer.size());
-
-            // Try to buffer full body if not already cached
-            if (!s->jsonBodyCached) {
-                s->jsonBuffering = true;
-                std::uint8_t tmp[4096];
-                while (true) {
-                    std::uint16_t chunk = 0;
-                    bool chunkEof = false;
-                    StatusCode st = s->proto->read_body(
-                        static_cast<std::uint32_t>(s->jsonBodyBuffer.size()),
-                        tmp, sizeof(tmp), chunk, chunkEof);
-                    if (st == StatusCode::NotReady) {
-                        resp.status = StatusCode::NotReady;
-                        return resp;
-                    }
-                    if (st != StatusCode::Ok) {
-                        s->jsonQuery.clear();
-                        s->jsonBuffering = false;
-                        resp.status = st;
-                        return resp;
-                    }
-                    if (chunk > 0) {
-                        s->jsonBodyBuffer.append(reinterpret_cast<const char*>(tmp), chunk);
-                    }
-                    if (chunkEof) {
-                        s->jsonBodyCached = true;
-                        s->jsonBuffering = false;
-                        break;
-                    }
-                    if (chunk == 0) {
-                        break;
-                    }
-                }
+            TranslationConfig translation;
+            if (!read_translation_config(r, translation) || r.remaining() != 0) {
+                resp.status = StatusCode::InvalidRequest;
+                return resp;
             }
 
-            // Apply JSON query from cached body
-            if (s->jsonBodyCached) {
-                cJSON* json = cJSON_Parse(s->jsonBodyBuffer.c_str());
-                if (json) {
-                    cJSON* item = cJSONUtils_GetPointer(json, s->jsonQuery.c_str());
-                    if (item) {
-                        s->jsonResult = json_item_to_string(item);
-                        s->jsonResultSize = static_cast<std::uint32_t>(s->jsonResult.size());
-                        FN_LOGD("net", "JsonQuery result handle=%u path=\"%s\" resultSize=%u result=\"%s\"",
-                            handle, s->jsonQuery.c_str(), s->jsonResultSize, s->jsonResult.c_str());
-                    } else {
-                        s->jsonResult.clear();
-                        s->jsonResultSize = 0;
-                        FN_LOGD("net", "JsonQuery no match handle=%u path=\"%s\"", handle, s->jsonQuery.c_str());
-                    }
-                    cJSON_Delete(json);
-                } else {
-                    s->jsonResult.clear();
-                    s->jsonResultSize = 0;
-                    FN_LOGW("net", "JsonQuery parse error handle=%u path=\"%s\"", handle, s->jsonQuery.c_str());
+            FN_LOGD("net", "TranslateConfigure handle=%u type=%u selector=\"%s\" bodyCached=%d bodySize=%zu",
+                    handle,
+                    static_cast<unsigned>(translation.type),
+                    translation.selector.c_str(),
+                    static_cast<int>(s->responseBodyCached),
+                    s->responseBodyCache.size());
+
+            const StatusCode configureSt = configure_translation(*s, translation);
+            if (configureSt != StatusCode::Ok) {
+                resp.status = configureSt;
+                return resp;
+            }
+
+            if (translation_enabled(*s)) {
+                const StatusCode translationSt = ensure_translation_ready(*s);
+                if (translationSt != StatusCode::Ok) {
+                    resp.status = translationSt;
+                    return resp;
                 }
-                s->jsonReady = true;
             }
 
             std::string out;
-            std::uint8_t jflags = s->jsonReady ? 0x01 : 0x00;
+            std::uint8_t jflags = s->translationReady ? 0x01 : 0x00;
             write_common_prefix(out, NETPROTO_VERSION, jflags);
             netproto::write_u16le(out, handle);
-            netproto::write_u16le(out, s->jsonResultSize);
+            netproto::write_u32le(out, static_cast<std::uint32_t>(s->translatedResultSize));
             resp.payload = to_vec(out);
             return resp;
         }
@@ -878,4 +992,3 @@ IOResponse NetworkDevice::handle(const IORequest& request)
 }
 
 } // namespace fujinet::io
-

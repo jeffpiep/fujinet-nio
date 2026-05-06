@@ -1,6 +1,7 @@
 #include "fujinet/io/devices/network_protocol_stub.h"
 
 #include <algorithm>
+#include <string_view>
 #include <string>
 
 namespace fujinet::io {
@@ -9,6 +10,22 @@ static bool is_body_method(std::uint8_t method)
 {
     // 2=POST, 3=PUT
     return method == 2 || method == 3;
+}
+
+static std::string extract_host(std::string_view url)
+{
+    const auto schemePos = url.find("://");
+    const auto hostStart = (schemePos == std::string_view::npos) ? 0 : (schemePos + 3);
+    const auto hostEnd = url.find('/', hostStart);
+    if (hostStart >= url.size()) {
+        return {};
+    }
+
+    if (hostEnd == std::string_view::npos) {
+        return std::string(url.substr(hostStart));
+    }
+
+    return std::string(url.substr(hostStart, hostEnd - hostStart));
 }
 
 StatusCode StubNetworkProtocol::open(const NetworkOpenRequest& req)
@@ -30,7 +47,13 @@ StatusCode StubNetworkProtocol::open(const NetworkOpenRequest& req)
         }
     }
     
-    const std::string bodyStr = std::string("stub response for: ") + _openReq.url + "\n";
+    std::string bodyStr;
+    if (_openReq.url.find("/json") != std::string::npos) {
+        const std::string host = extract_host(_openReq.url);
+        bodyStr = std::string("{\"url\":\"") + _openReq.url + "\",\"headers\":{\"Host\":\"" + host + "\"}}";
+    } else {
+        bodyStr = std::string("stub response for: ") + _openReq.url + "\n";
+    }
     _body.assign(bodyStr.begin(), bodyStr.end());
     _contentLength = static_cast<std::uint64_t>(_body.size());
 
@@ -122,5 +145,4 @@ void StubNetworkProtocol::close()
 }
 
 } // namespace fujinet::io
-
 

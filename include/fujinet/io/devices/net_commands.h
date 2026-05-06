@@ -11,7 +11,7 @@ enum class NetworkCommand : std::uint8_t {
     Close    = 0x04,
     Info     = 0x05,
     InfoRead = 0x06,
-    JsonQuery = 0x07,
+    TranslateConfigure = 0x07,
 };
 
 inline NetworkCommand to_network_command(std::uint16_t raw)
@@ -20,4 +20,3 @@ inline NetworkCommand to_network_command(std::uint16_t raw)
 }
 
 } // namespace fujinet::io::protocol
-

@@ -103,6 +103,7 @@ target_compile_definitions(fujinet-nio
 target_sources(fujinet-nio
     PRIVATE
 # __TARGET_SOURCES_START__
+        src/lib/json_content_translator.cpp
 # __TARGET_SOURCES_END__
         third_party/cjson/cJSON.c
         third_party/cjson/cJSON_Utils.c

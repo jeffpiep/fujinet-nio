@@ -76,6 +76,7 @@ NET_COMMANDS = {
     4: "Close",
     5: "Info",
     6: "InfoRead",
+    7: "TranslateConfigure",
 }
 
 
@@ -249,6 +250,8 @@ def cmd_net_open(args) -> int:
         headers=_collect_request_headers(args),
         body_len_hint=args.body_len_hint,
         response_headers=getattr(args, "resp_header", None) or [],
+        translation_type=_translation_type_value(getattr(args, "content_type", "none")),
+        translation_selector=getattr(args, "selector", "") or "",
     )
 
     with open_serial(args.port, args.baud, timeout_s=0.01) as ser:
@@ -304,15 +307,38 @@ def cmd_net_close(args) -> int:
         return 0
 
 
-def cmd_net_json_query(args) -> int:
-    req = np.build_json_query_req(args.handle, args.path)
+def _translation_type_value(name: str) -> int:
+    key = (name or "none").strip().lower()
+    mapping = {
+        "none": np.TRANSLATION_NONE,
+        "json": np.TRANSLATION_JSON,
+        "xml": np.TRANSLATION_XML,
+        "rss": np.TRANSLATION_RSS,
+    }
+    if key not in mapping:
+        raise ValueError(f"Unsupported content type: {name}")
+    return mapping[key]
+
+
+def cmd_net_translate(args) -> int:
+    try:
+        translation_type = _translation_type_value(args.content_type)
+    except ValueError as e:
+        print(str(e))
+        return 2
+
+    req = np.build_translate_configure_req(
+        args.handle,
+        translation_type=translation_type,
+        translation_selector=args.selector,
+    )
 
     with open_serial(args.port, args.baud, timeout_s=0.01) as ser:
         bus = FujiBusSession().attach(ser, debug=args.debug)
         pkt = _send_retry_not_ready(
             bus=bus,
             device=np.NETWORK_DEVICE_ID,
-            command=np.CMD_JSON_QUERY,
+            command=np.CMD_TRANSLATE_CONFIGURE,
             payload=req,
             timeout=args.timeout,
             retries=200,
@@ -327,18 +353,13 @@ def cmd_net_json_query(args) -> int:
             return 1
 
         try:
-            off = np._check_version(pkt.payload, 0)
-            flags_byte, off = np.read_u8(pkt.payload, off)
-            _reserved, off = np.read_u16le(pkt.payload, off)
-            handle, off = np.read_u16le(pkt.payload, off)
-            result_size, off = np.read_u16le(pkt.payload, off)
+            tr = np.parse_translate_configure_resp(pkt.payload)
         except ValueError as e:
             print(f"Parse error: {e}")
             return 2
 
-        result_available = bool(flags_byte & 0x01)
         print(
-            f"handle={handle} result_available={result_available} result_size={result_size}"
+            f"handle={tr.handle} result_available={tr.ready} result_size={tr.translated_size}"
         )
         return 0
 
@@ -504,6 +525,8 @@ def cmd_net_get(args) -> int:
             headers=_collect_request_headers(args),
             body_len_hint=0,
             response_headers=resp_headers,
+            translation_type=_translation_type_value(getattr(args, "content_type", "none")),
+            translation_selector=getattr(args, "selector", "") or "",
         )
         pkt = _send_retry_not_ready(
             bus=bus,
@@ -659,6 +682,8 @@ def cmd_net_head(args) -> int:
             headers=_collect_request_headers(args),
             body_len_hint=0,
             response_headers=getattr(args, "resp_header", None) or [],
+            translation_type=_translation_type_value(getattr(args, "content_type", "none")),
+            translation_selector=getattr(args, "selector", "") or "",
         )
         pkt = _send_retry_not_ready(
             bus=bus,
@@ -772,6 +797,8 @@ def cmd_net_send(args) -> int:
                 else (body_len_hint if (args.method in (2, 3)) else 0)
             ),
             response_headers=resp_headers,
+            translation_type=_translation_type_value(getattr(args, "content_type", "none")),
+            translation_selector=getattr(args, "selector", "") or "",
         )
 
         # OPEN
@@ -1026,6 +1053,17 @@ def register_subcommands(subparsers) -> None:
         default=[],
         help="Read request headers from file (repeatable). One per line: Key=Value or Key: Value",
     )
+    pno.add_argument(
+        "--content-type",
+        choices=["none", "json", "xml", "rss"],
+        default="none",
+        help="Enable a translated response view for the handle",
+    )
+    pno.add_argument(
+        "--selector",
+        default="",
+        help="Translator selector (JSON Pointer for JSON mode)",
+    )
     pno.add_argument("url")
     pno.set_defaults(fn=cmd_net_open)
 
@@ -1080,6 +1118,17 @@ def register_subcommands(subparsers) -> None:
         default=[],
         help="Read request headers from file (repeatable). One per line: Key=Value or Key: Value",
     )
+    png.add_argument(
+        "--content-type",
+        choices=["none", "json", "xml", "rss"],
+        default="none",
+        help="Enable a translated response view for the handle",
+    )
+    png.add_argument(
+        "--selector",
+        default="",
+        help="Translator selector (JSON Pointer for JSON mode)",
+    )
     png.add_argument("url")
     png.set_defaults(fn=cmd_net_get)
 
@@ -1102,6 +1151,17 @@ def register_subcommands(subparsers) -> None:
         action="append",
         default=[],
         help="Read request headers from file (repeatable). One per line: Key=Value or Key: Value",
+    )
+    pnh.add_argument(
+        "--content-type",
+        choices=["none", "json", "xml", "rss"],
+        default="none",
+        help="Enable a translated response view for the handle",
+    )
+    pnh.add_argument(
+        "--selector",
+        default="",
+        help="Translator selector (JSON Pointer for JSON mode)",
     )
     pnh.add_argument("url")
     pnh.set_defaults(fn=cmd_net_head)
@@ -1167,14 +1227,30 @@ def register_subcommands(subparsers) -> None:
         default=[],
         help="Read request headers from file (repeatable). One per line: Key=Value or Key: Value",
     )
+    pns.add_argument(
+        "--content-type",
+        choices=["none", "json", "xml", "rss"],
+        default="none",
+        help="Enable a translated response view for the handle",
+    )
+    pns.add_argument(
+        "--selector",
+        default="",
+        help="Translator selector (JSON Pointer for JSON mode)",
+    )
     pns.add_argument("url")
     pns.set_defaults(fn=cmd_net_send)
 
-    # JSON Query subcommand: send a JSON Pointer path to query on an open handle
-    pjq = nsub.add_parser("json-query", help="Apply JSON Pointer query to an open network connection")
-    pjq.add_argument("--handle", type=int, required=True, help="Handle from net open")
-    pjq.add_argument("--path", required=True, help="JSON Pointer path (e.g. /url)")
-    pjq.add_argument("--timeout", type=float, default=10.0)
-    pjq.set_defaults(fn=cmd_net_json_query)
+    ptr = nsub.add_parser("translate", help="Configure a translated response view on an open handle")
+    ptr.add_argument("--handle", type=int, required=True, help="Handle from net open")
+    ptr.add_argument(
+        "--content-type",
+        choices=["none", "json", "xml", "rss"],
+        default="json",
+        help="Translation type to apply",
+    )
+    ptr.add_argument("--selector", default="", help="Translator selector")
+    ptr.add_argument("--timeout", type=float, default=10.0)
+    ptr.set_defaults(fn=cmd_net_translate)
 
     net_tcp.register_tcp_subcommands(nsub)

@@ -16,6 +16,11 @@ CMakeFiles/
 /platformio.local-*.ini
 
 /plans/
+/.kilo/
+/.pytest_cache/
+/.ruff_cache/
+/.cache/
+/Testing/
 
 # a file for dumping ideas and thoughts that shouldn't go into repo
 /docs/todo.txt
