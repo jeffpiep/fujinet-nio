@@ -233,6 +233,34 @@ __
 -_handler : IRequestHandler &
 -_transports : std::vector<ITransport *>
 }
+enum "io::ContentTranslationType" as C_0018307773322721098785
+enum C_0018307773322721098785 {
+None
+Json
+Xml
+Rss
+}
+class "io::TranslationConfig" as C_0011628969558439618672
+class C_0011628969558439618672 {
++enabled() const noexcept : bool
+__
++flags : std::uint8_t
++selector : std::string
++type : ContentTranslationType
+}
+abstract "io::IContentTranslator" as C_0017172268465975245210
+abstract C_0017172268465975245210 {
++~IContentTranslator() constexpr = default : void
+..
+{abstract} +append_body(const std::uint8_t * data, std::size_t len) = 0 : StatusCode
+{abstract} +configure(const TranslationConfig & config) = 0 : StatusCode
+{abstract} +finalize() = 0 : StatusCode
++needs_full_body() const : bool
+{abstract} +read(std::uint32_t offset, std::uint8_t * out, std::size_t maxBytes, std::uint16_t & actual, bool & eof) const = 0 : StatusCode
+{abstract} +reset() = 0 : void
+{abstract} +translated_size() const = 0 : std::uint64_t
+__
+}
 class "io::ProtocolRegistry" as C_0011868125949252482179
 class C_0011868125949252482179 {
 +create(std::string_view schemeLower) const : std::unique_ptr<INetworkProtocol>
@@ -244,14 +272,21 @@ class "io::NetworkDevice" as C_0006245826437162508923
 class C_0006245826437162508923 {
 +NetworkDevice(ProtocolRegistry registry) : void
 ..
+-buffer_translation_body(Session & s) : StatusCode
 -close_and_free(Session & s) noexcept : void
+-configure_translation(Session & s, const TranslationConfig & config) : StatusCode
+-ensure_translation_ready(Session & s) : StatusCode
+-finalize_translation(Session & s) : StatusCode
 +handle(const IORequest & request) : IOResponse
 {static} -handle_generation(std::uint16_t h) noexcept : std::uint8_t
 {static} -handle_index(std::uint16_t h) noexcept : std::uint8_t
 {static} -make_handle(std::uint8_t idx, std::uint8_t gen) noexcept : std::uint16_t
+{static} -make_translator(ContentTranslationType type) : std::unique_ptr<IContentTranslator>
 -pick_lru_victim() noexcept : Session *
 +poll() : void
+{static} -reset_translation(Session & s) noexcept : void
 -touch(Session & s) noexcept : void
+{static} -translation_enabled(const Session & s) noexcept : bool
 __
 {static} -IDLE_TIMEOUT_TICKS : const std::uint64_t
 {static} -MAX_SESSIONS : const std::size_t
@@ -276,6 +311,13 @@ __
 +nextBodyOffset : std::uint32_t
 +proto : std::unique_ptr<INetworkProtocol>
 +receivedBodyLen : std::uint32_t
++responseBodyBuffering : bool
++responseBodyCache : std::string
++responseBodyCached : bool
++translatedResultSize : std::uint64_t
++translation : TranslationConfig
++translationReady : bool
++translator : std::unique_ptr<IContentTranslator>
 +url : std::string
 }
 class "io::NetworkDeviceDiagnosticsAccessor" as C_0010580021346264420268
@@ -429,6 +471,19 @@ class "io::DiskDeviceDiagnosticsAccessor" as C_0016910926688454257733
 class C_0016910926688454257733 {
 {static} +slots(const DiskDevice & dev) : std::vector<disk::DiskSlotInfo>
 __
+}
+class "io::JsonContentTranslator" as C_0006788839814876680044
+class C_0006788839814876680044 {
++append_body(const std::uint8_t * data, std::size_t len) : StatusCode
++configure(const TranslationConfig & config) : StatusCode
++finalize() : StatusCode
++read(std::uint32_t offset, std::uint8_t * out, std::size_t maxBytes, std::uint16_t & actual, bool & eof) const : StatusCode
++reset() : void
++translated_size() const : std::uint64_t
+__
+-_body : std::string
+-_config : TranslationConfig
+-_translated : std::string
 }
 class "io::ClockDevice" as C_0006193474076654383504
 class C_0006193474076654383504 {
@@ -1209,16 +1264,25 @@ C_0005273847708888915350 o-- C_0007350464861923755413 : -_overrideOwned
 C_0007350464861923755413 <|-- C_0005273847708888915350
 C_0007645722238685656096 --> C_0007350464861923755413 : -_handler
 C_0007645722238685656096 --> C_0015529497257294770104 : -_transports
+C_0011628969558439618672 o-- C_0018307773322721098785 : +type
+C_0017172268465975245210 ..> C_0011628969558439618672
+C_0017172268465975245210 ..> C_0012496700434923238249
 C_0011868125949252482179 ..> C_0010613333864250568344
 C_0011868125949252482179 ..> C_0010613333864250568344 : -_factories
 C_0006245826437162508923 ..> C_0002386736627821114488
 C_0006245826437162508923 ..> C_0002942984525013396621
+C_0006245826437162508923 ..> C_0018307773322721098785
+C_0006245826437162508923 ..> C_0017172268465975245210
+C_0006245826437162508923 ..> C_0011628969558439618672
+C_0006245826437162508923 ..> C_0012496700434923238249
 C_0006245826437162508923 o-- C_0011301425670680674257 : -_sessions
 C_0006245826437162508923 o-- C_0011868125949252482179 : -_registry
 C_0006245826437162508923 <.. C_0010580021346264420268 : +<<friend>>
 C_0010069830097413987109 <|-- C_0006245826437162508923
 C_0011301425670680674257 --+ C_0006245826437162508923
 C_0011301425670680674257 o-- C_0010613333864250568344 : +proto
+C_0011301425670680674257 o-- C_0011628969558439618672 : +translation
+C_0011301425670680674257 o-- C_0017172268465975245210 : +translator
 C_0010580021346264420268 ..> C_0006245826437162508923
 C_0018348317585229177251 ..> C_0002386736627821114488
 C_0018348317585229177251 ..> C_0002942984525013396621
@@ -1249,6 +1313,9 @@ C_0005932353517374970487 <.. C_0016910926688454257733 : +<<friend>>
 C_0010069830097413987109 <|-- C_0005932353517374970487
 C_0016910926688454257733 ..> C_0005932353517374970487
 C_0016910926688454257733 ..> C_0000494354313681174192
+C_0006788839814876680044 ..> C_0012496700434923238249
+C_0006788839814876680044 o-- C_0011628969558439618672 : -_config
+C_0017172268465975245210 <|-- C_0006788839814876680044
 C_0006193474076654383504 ..> C_0002386736627821114488
 C_0006193474076654383504 ..> C_0002942984525013396621
 C_0006193474076654383504 --> C_0010708806357379257038 : -_configStore
