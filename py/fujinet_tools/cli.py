@@ -11,11 +11,17 @@ from . import bbc as bbc_cmds
 from . import modem as modem_cmds
 from . import monitor as monitor_cmds
 from . import analyze_capture as analyze_capture_cmds
+from . import extract_log_mocks as extract_log_mocks_cmds
 
 
 def main() -> None:
     p = argparse.ArgumentParser(prog="fujinet")
-    p.add_argument("--port", "-p", required=True)
+    p.add_argument(
+        "--port",
+        "-p",
+        default=None,
+        help="Serial port (required for device/monitor commands)",
+    )
     p.add_argument("--baud", type=int, default=115200)
     p.add_argument("--timeout", type=float, default=5)
     p.add_argument("--read-max", type=int, default=2048)
@@ -33,6 +39,7 @@ def main() -> None:
     bbc_cmds.register_subcommands(sub)
     modem_cmds.register_subcommands(sub)
     analyze_capture_cmds.register_subcommands(sub)
+    extract_log_mocks_cmds.register_subcommands(sub)
 
     pm = sub.add_parser("monitor", help="Live FujiBus-over-SLIP serial monitor")
     pm.add_argument(

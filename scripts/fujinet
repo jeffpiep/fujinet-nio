@@ -3,7 +3,10 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VENV_DIR="${ROOT}/build/.venv"
-ACTIVATE="${VENV_DIR}/bin/activate"
+PY_SRC="${ROOT}/py"
+
+# Caller shells often have VIRTUAL_ENV set; ignore it so uv targets this project.
+unset VIRTUAL_ENV
 
 # Ensure uv is available
 ensure_uv() {
@@ -25,14 +28,34 @@ ensure_venv() {
   fi
 }
 
+editable_pth() {
+  find "${VENV_DIR}/lib" -name '__editable__.fujinet_tools-*.pth' 2>/dev/null | head -1
+}
+
+repair_editable_if_stale() {
+  local pth
+  pth="$(editable_pth || true)"
+  if [[ -z "${pth}" ]]; then
+    return
+  fi
+  if [[ "$(tr -d '\r\n' < "${pth}")" == "${PY_SRC}" ]]; then
+    return
+  fi
+  echo "[fujinet] repairing stale editable install (project moved?)"
+  printf '%s\n' "${PY_SRC}" > "${pth}"
+}
+
 ensure_synced() {
-  # Activate venv and sync dependencies from pyproject.toml (and uv.lock if present)
-  # uv sync automatically reads pyproject.toml and installs the project in editable mode
-  source "${ACTIVATE}"
-  uv sync --active >/dev/null
+  # Install into build/.venv (not the default project-root .venv).
+  export UV_PROJECT="${ROOT}"
+  export UV_PROJECT_ENVIRONMENT="${VENV_DIR}"
+  uv sync >/dev/null
+  repair_editable_if_stale
 }
 
 run_cli() {
+  # Always expose in-tree sources so CLI works even if editable metadata is stale.
+  export PYTHONPATH="${PY_SRC}${PYTHONPATH:+:${PYTHONPATH}}"
   exec "${VENV_DIR}/bin/python" -m fujinet_tools.cli "$@"
 }
 

@@ -16,5 +16,8 @@ dependencies = [
 [tool.setuptools]
 package-dir = {"" = "py"}
 
+[tool.setuptools.packages.find]
+where = ["py"]
+
 [project.scripts]
 fujinet = "fujinet_tools.cli:main"

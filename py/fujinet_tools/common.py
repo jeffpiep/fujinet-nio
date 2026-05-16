@@ -15,12 +15,14 @@ except Exception:
     serial = None  # pyright: ignore
 
 
-def open_serial(port: str, baud: int, timeout_s: float):
+def open_serial(port: str | None, baud: int, timeout_s: float):
     """
     Open a serial port with consistent settings.
 
     Small per-read timeout; we enforce overall timeout ourselves.
     """
+    if not port:
+        raise SystemExit("error: --port/-p is required for this command")
     if serial is None:
         raise RuntimeError("pyserial not available, cannot open serial port")
     return serial.Serial(
