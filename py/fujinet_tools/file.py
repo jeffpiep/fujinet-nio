@@ -30,10 +30,10 @@ def _mkdir_p(*, args, bus: FujiBusSession, uri: str) -> bool:
     req = fp.build_mkdir_req(uri=uri, parents=True, exist_ok=True)
     pkt = bus.send_command_expect(
         device=fp.FILE_DEVICE_ID,
-        command=fp.CMD_MKDIR,
+        command=fp.CMD_MAKE_DIRECTORY,
         payload=req,
         expect_device=fp.FILE_DEVICE_ID,
-        expect_command=fp.CMD_MKDIR,
+        expect_command=fp.CMD_MAKE_DIRECTORY,
         timeout=args.timeout,
         cmd_txt="MKDIR",
     )

@@ -5,7 +5,13 @@ import unittest
 from pathlib import Path
 
 from . import diskproto as dp
-from .extract_log_mocks import extract_mocks_from_log, extract_log_mocks
+from . import fileproto as fp
+from .extract_log_mocks import (
+    _build_filename,
+    _request_filename_suffix,
+    extract_mocks_from_log,
+    extract_log_mocks,
+)
 import argparse
 
 
@@ -13,6 +19,20 @@ _FIXTURE = Path(__file__).resolve().parents[1] / "unittest_data" / "cat01.txt"
 
 
 class TestExtractLogMocks(unittest.TestCase):
+    def test_resolve_path_filename_not_make_directory(self) -> None:
+        req = fp.build_resolve_path_req(
+            base_uri="tnfs://server/root", arg="NEXT"
+        )
+        suffix = _request_filename_suffix(fp.FILE_DEVICE_ID, fp.CMD_RESOLVE_PATH, req)
+        self.assertEqual(suffix, "root_NEXT")
+        name = _build_filename(1, fp.FILE_DEVICE_ID, fp.CMD_RESOLVE_PATH, req)
+        self.assertEqual(name, "001_resolve_path_root_NEXT.bin")
+
+    def test_make_directory_filename(self) -> None:
+        req = fp.build_mkdir_req(uri="sd0:/newdir")
+        name = _build_filename(2, fp.FILE_DEVICE_ID, fp.CMD_MAKE_DIRECTORY, req)
+        self.assertEqual(name, "002_make_directory_newdir.bin")
+
     def test_cat01_extracts_two_read_sector_mocks(self) -> None:
         if not _FIXTURE.is_file():
             self.skipTest(f"fixture missing: {_FIXTURE}")

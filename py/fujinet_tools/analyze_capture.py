@@ -31,19 +31,21 @@ COMMAND_NAMES: dict[int, dict[int, str]] = {
         0xFB: "GetMount",
     },
     0x45: {
-        0x01: "Get",
-        0x02: "Set",
-        0x03: "GetFormat",
+        0x01: "GetTime",
+        0x02: "SetTime",
+        0x03: "GetTimeFormat",
         0x04: "GetTimezone",
         0x05: "SetTimezone",
         0x06: "SetTimezoneSave",
+        0x07: "SyncNetworkTime",
     },
     fp.FILE_DEVICE_ID: {
         fp.CMD_STAT: "Stat",
         fp.CMD_LIST: "ListDirectory",
         fp.CMD_READ: "ReadFile",
         fp.CMD_WRITE: "WriteFile",
-        fp.CMD_MKDIR: "MakeDirectory",
+        fp.CMD_RESOLVE_PATH: "ResolvePath",
+        fp.CMD_MAKE_DIRECTORY: "MakeDirectory",
     },
     dp.DISK_DEVICE_ID: {
         dp.CMD_MOUNT: "Mount",
@@ -60,6 +62,8 @@ COMMAND_NAMES: dict[int, dict[int, str]] = {
         np.CMD_WRITE: "Write",
         np.CMD_CLOSE: "Close",
         np.CMD_INFO: "Info",
+        np.CMD_INFO_READ: "InfoRead",
+        np.CMD_TRANSLATE_CONFIGURE: "TranslateConfigure",
     },
     mp.MODEM_DEVICE_ID: {
         mp.CMD_WRITE: "Write",
@@ -193,6 +197,9 @@ def _decode_semantic_hint(ev: CapturedFrame) -> Optional[str]:
         if ev.device == fp.FILE_DEVICE_ID and ev.command == fp.CMD_WRITE:
             r = fp.parse_write_resp(payload)
             return f"offset={r.offset} written={r.written}"
+        if ev.device == fp.FILE_DEVICE_ID and ev.command == fp.CMD_RESOLVE_PATH:
+            r = fp.parse_resolve_path_resp(payload)
+            return f"uri={r.resolved_uri!r} path={r.display_path!r}"
 
         if ev.device == dp.DISK_DEVICE_ID and ev.command == dp.CMD_INFO:
             r = dp.parse_info_resp(payload)
