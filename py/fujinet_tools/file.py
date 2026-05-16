@@ -51,12 +51,15 @@ def cmd_list(args) -> int:
     uri = _parse_uri(args.uri)
     start = args.start
     all_entries: list[fp.ListEntry] = []
+    list_flags = fp.LIST_FLAG_COMPACT if args.compact else 0
 
     with open_serial(args.port, args.baud, timeout_s=0.01) as ser:
         bus = FujiBusSession().attach(ser, debug=args.debug)
 
         while True:
-            req = fp.build_list_req(uri, start, args.max_payload)
+            req = fp.build_list_req(
+                uri, start, args.max_payload, list_flags=list_flags
+            )
             pkt = bus.send_command_expect(
                 device=fp.FILE_DEVICE_ID,
                 command=fp.CMD_LIST,
@@ -91,16 +94,22 @@ def cmd_list(args) -> int:
             if args.verbose:
                 print(
                     f"list chunk: start={lr.start_index} count={lr.entry_count} "
-                    f"bytes={lr.entries_len} more={lr.more}"
+                    f"bytes={lr.entries_len} more={lr.more} compact={lr.compact}"
                 )
 
             if not lr.more:
                 break
 
-    print(f"{args.uri} (entries={len(all_entries)})")
+    mode = "compact" if args.compact else "long"
+    print(f"{args.uri} (entries={len(all_entries)}, {mode})")
     for e in all_entries:
         kind = "DIR " if e.is_dir else "FILE"
-        print(f"{kind} {e.size_bytes:10d}  {fp.fmt_utc(e.mtime_unix):>20}  {e.name}")
+        if args.compact:
+            print(f"{kind} {e.name}")
+        else:
+            print(
+                f"{kind} {e.size_bytes:10d}  {fp.fmt_utc(e.mtime_unix):>20}  {e.name}"
+            )
 
     return 0
 
@@ -355,6 +364,11 @@ def register_subcommands(subparsers) -> None:
         type=int,
         default=512,
         help="Max bytes for the variable entries blob per request",
+    )
+    pl.add_argument(
+        "--compact",
+        action="store_true",
+        help="Omit per-entry size and mtime (names and dir/file type only)",
     )
     pl.add_argument("--verbose", action="store_true")
     pl.add_argument("uri", help="URI (e.g., tnfs://host:port/, /path, sd0:/path)")

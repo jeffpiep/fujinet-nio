@@ -29,6 +29,10 @@ CMD_RESOLVE_PATH = 0x05
 CMD_MAKE_DIRECTORY = 0x06
 CMD_MKDIR = CMD_MAKE_DIRECTORY  # backward-compatible alias
 
+# ListDirectory listFlags (matches file_commands.h)
+LIST_FLAG_COMPACT = 0x01
+LIST_FLAG_SORT_BY_NAME = 0x02
+
 
 def _lp_u16(s: str) -> bytes:
     """Length-prefixed u16 string (for URIs)."""
