@@ -9,22 +9,6 @@ DiskService
 NetworkService
 FileService
 }
-enum "io::protocol::FileCommand" as C_0003895064208135060769
-enum C_0003895064208135060769 {
-Stat
-ListDirectory
-ReadFile
-WriteFile
-ResolvePath
-MakeDirectory
-}
-enum "io::protocol::ModemCommand" as C_0010997942004027913014
-enum C_0010997942004027913014 {
-Write
-Read
-Status
-Control
-}
 enum "io::protocol::SlipByte" as C_0010627602090167488081
 enum C_0010627602090167488081 {
 End
@@ -75,15 +59,14 @@ __
 -_device : WireDeviceId
 -_params : std::vector<PacketParam>
 }
-enum "io::protocol::DiskCommand" as C_0015699043703645047876
-enum C_0015699043703645047876 {
-Mount
-Unmount
-ReadSector
-WriteSector
-Info
-ClearChanged
-Create
+class "io::protocol::FujiBusHeader" as C_0009954510640382192371
+class C_0009954510640382192371 {
+__
++checksum : std::uint8_t
++command : std::uint8_t
++descr : std::uint8_t
++device : std::uint8_t
++length : std::uint16_t
 }
 enum "io::protocol::NetworkCommand" as C_0007700754280455587098
 enum C_0007700754280455587098 {
@@ -95,6 +78,25 @@ Info
 InfoRead
 TranslateConfigure
 }
+enum "io::protocol::DiskCommand" as C_0015699043703645047876
+enum C_0015699043703645047876 {
+Mount
+Unmount
+ReadSector
+WriteSector
+Info
+ClearChanged
+Create
+}
+enum "io::protocol::FileCommand" as C_0003895064208135060769
+enum C_0003895064208135060769 {
+Stat
+ListDirectory
+ReadFile
+WriteFile
+ResolvePath
+MakeDirectory
+}
 enum "io::protocol::FujiCommand" as C_0004628219160953719395
 enum C_0004628219160953719395 {
 Reset
@@ -103,14 +105,12 @@ GetMounts
 SetMount
 GetMount
 }
-class "io::protocol::FujiBusHeader" as C_0009954510640382192371
-class C_0009954510640382192371 {
-__
-+checksum : std::uint8_t
-+command : std::uint8_t
-+descr : std::uint8_t
-+device : std::uint8_t
-+length : std::uint16_t
+enum "io::protocol::ModemCommand" as C_0010997942004027913014
+enum C_0010997942004027913014 {
+Write
+Read
+Status
+Control
 }
 C_0017232777488057089840 o-- C_0015225225004340369839 : -_device
 C_0017232777488057089840 o-- C_0003277087640557799971 : -_params
