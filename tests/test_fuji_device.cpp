@@ -152,6 +152,29 @@ TEST_CASE("FujiDevice clears a persisted mount when URI is empty")
     CHECK(storePtr->_config.mounts.empty());
 }
 
+TEST_CASE("FujiDevice accepts a 4-byte clear mount request with empty URI and mode")
+{
+    FujiConfig initial;
+    initial.mounts.push_back(MountConfig{2, "tnfs://server/game.atr", "rw", true});
+
+    auto store = std::make_unique<MemoryFujiConfigStore>(initial);
+    auto* storePtr = store.get();
+    fujinet::fs::StorageManager storage;
+    FujiDevice device(nullptr, std::move(store), storage);
+    device.start();
+
+    IORequest req{};
+    req.id = 1;
+    req.deviceId = 0x70;
+    req.command = static_cast<std::uint16_t>(FujiCommand::SetMount);
+    req.payload = {1, 0x00, 0x00, 0x00};
+
+    auto resp = device.handle(req);
+    REQUIRE(resp.status == StatusCode::Ok);
+    CHECK(storePtr->_config.mounts.empty());
+    CHECK(storePtr->saveCount == 1);
+}
+
 TEST_CASE("FujiDevice reports an empty persisted mount record for an unused slot")
 {
     auto store = std::make_unique<MemoryFujiConfigStore>(FujiConfig{});

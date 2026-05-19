@@ -130,11 +130,17 @@ IOResponse FujiDevice::handle_set_mount(const IORequest& request)
         return make_base_response(request, StatusCode::InvalidRequest);
     }
 
+    // Empty/clear records must still provide the full 4-byte header
+    // [slot][flags][uri_len][mode_len]. Reject any truncated or overlong form
+    // before indexing into the payload.
     const std::uint8_t uri_len = request.payload[offset++];
     if (offset + uri_len > request.payload.size()) {
         return make_base_response(request, StatusCode::InvalidRequest);
     }
-    std::string uri(reinterpret_cast<const char*>(&request.payload[offset]), uri_len);
+    std::string uri;
+    if (uri_len > 0) {
+        uri.assign(reinterpret_cast<const char*>(request.payload.data() + offset), uri_len);
+    }
     offset += uri_len;
 
     if (offset >= request.payload.size()) {
@@ -145,7 +151,10 @@ IOResponse FujiDevice::handle_set_mount(const IORequest& request)
     if (offset + mode_len > request.payload.size()) {
         return make_base_response(request, StatusCode::InvalidRequest);
     }
-    std::string mode(reinterpret_cast<const char*>(&request.payload[offset]), mode_len);
+    std::string mode;
+    if (mode_len > 0) {
+        mode.assign(reinterpret_cast<const char*>(request.payload.data() + offset), mode_len);
+    }
     offset += mode_len;
 
     if (offset != request.payload.size()) {
