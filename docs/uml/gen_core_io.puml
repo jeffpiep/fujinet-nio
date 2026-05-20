@@ -474,6 +474,7 @@ class C_0016024516082849980408 {
 {static} -encode_mount_record(std::uint8_t slotIndex, const std::string & uri, const std::string & mode, bool enabled) : std::vector<std::uint8_t>
 -find_mount_by_slot_number(int slot) : config::MountConfig *
 -find_mount_by_slot_number(int slot) const : const config::MountConfig *
+{static} -format_mount_line(int slotNumber, std::string_view uri, std::string_view mode, bool enabled) : std::string
 +handle(const IORequest & request) : IOResponse
 -handle_get_mount(const IORequest & request) : IOResponse
 -handle_get_mounts(const IORequest & request) : IOResponse
@@ -733,6 +734,12 @@ class C_0016209491923540983265 {
 __
 +arg : std::string
 +base_uri : std::string
+}
+class "io::UriDisplayParts" as C_0017616616105646512159
+class C_0017616616105646512159 {
+__
++detail : std::string
++summary : std::string
 }
 class "io::ClockDevice" as C_0006193474076654383504
 class C_0006193474076654383504 {
