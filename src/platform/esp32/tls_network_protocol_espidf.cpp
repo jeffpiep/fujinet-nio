@@ -4,7 +4,10 @@
 #include <cstring>
 
 #include "fujinet/core/logging.h"
+#include "fujinet/net/https_trust_config.h"
 #include "fujinet/net/test_ca_cert.h"
+#include "fujinet/platform/esp32/https_trust_esp32.h"
+#include "fujinet/platform/esp32/tls_diagnostics.h"
 
 extern "C" {
 #include "esp_tls.h"
@@ -97,9 +100,9 @@ fujinet::io::StatusCode TlsNetworkProtocolEspIdf::open(const fujinet::io::Networ
 {
     close();
 
-    const bool use_test_ca = true;
-    if (use_test_ca) {
-        FN_LOGD(TAG, "TLS: Enabling additive FujiNet Test CA trust");
+    const auto trust_policy = fujinet::net::https_trust_policy();
+    if (trust_policy == fujinet::net::HttpsTrustPolicy::PlatformPlusTestCa) {
+        FN_LOGD(TAG, "TLS: enabling FujiNet test CA fallback with platform trust");
     }
 
     if (!parse_tls_url(req.url, _host, _port)) {
@@ -107,19 +110,11 @@ fujinet::io::StatusCode TlsNetworkProtocolEspIdf::open(const fujinet::io::Networ
         return fujinet::io::StatusCode::InvalidRequest;
     }
 
-    FN_LOGI(TAG, "TLS: Connecting to %s:%u%s", _host.c_str(), _port,
-            use_test_ca ? " (test CA + system trust)" : "");
+    FN_LOGI(TAG, "TLS: Connecting to %s:%u", _host.c_str(), _port);
 
     // Configure TLS
     esp_tls_cfg_t tls_cfg{};
-    if (use_test_ca) {
-        // esp_tls also uses either an explicit CA PEM or the built-in CRT bundle.
-        tls_cfg.crt_bundle_attach = nullptr;
-        tls_cfg.cacert_buf = reinterpret_cast<const unsigned char*>(fujinet::net::test_ca_cert_pem);
-        tls_cfg.cacert_bytes = sizeof(fujinet::net::test_ca_cert_pem);
-    } else {
-        tls_cfg.crt_bundle_attach = esp_crt_bundle_attach;
-    }
+    configure_tls_trust(tls_cfg);
     tls_cfg.timeout_ms = CONNECT_TIMEOUT_MS;
 
     // Create TLS connection
@@ -134,17 +129,7 @@ fujinet::io::StatusCode TlsNetworkProtocolEspIdf::open(const fujinet::io::Networ
                                     _port, &tls_cfg, _tls);
 
     if (ret != 1) {
-        int espErr = 0;
-        int tlsFlags = 0;
-        esp_tls_error_handle_t errHandle = nullptr;
-        esp_tls_get_error_handle(_tls, &errHandle);
-        if (errHandle) {
-            esp_tls_get_and_clear_last_error(errHandle, &espErr, &tlsFlags);
-        }
-        
-        FN_LOGE(TAG, "TLS: Connection failed to %s:%u, err=%d", 
-                _host.c_str(), _port, espErr);
-        
+        log_esp_tls_connection_failure("tls_conn", _tls, ret);
         esp_tls_conn_destroy(_tls);
         _tls = nullptr;
         return fujinet::io::StatusCode::IOError;

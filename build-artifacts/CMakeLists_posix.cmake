@@ -19,6 +19,8 @@ option(FN_BUILD_POSIX_APP     "Build POSIX console application"           ON)
 option(FN_BUILD_TESTS         "Build unit tests"                          ON)
 option(FN_WITH_CURL           "Enable libcurl-backed HTTP/HTTPS on POSIX" ON)
 option(FN_DEBUG_LOG_TS        "Prefix debug logs with a timestamp"        OFF)
+option(FN_HTTPS_TEST_CA       "Trust only the embedded FujiNet test CA"     OFF)
+option(FN_HTTPS_TEST_CA_ADDITIVE "Add FujiNet test CA to platform trust roots" OFF)
 
 # Allow quick enablement from the environment (configure-time).
 # Examples:
@@ -92,6 +94,8 @@ target_compile_definitions(fujinet-nio
         FN_PLATFORM_POSIX               # always true in this toolchain
         $<$<CONFIG:Debug>:FN_DEBUG>
         $<$<BOOL:${FN_DEBUG_LOG_TS}>:FN_DEBUG_LOG_TS>
+        $<$<BOOL:${FN_HTTPS_TEST_CA}>:FN_HTTPS_TEST_CA=1>
+        $<$<BOOL:${FN_HTTPS_TEST_CA_ADDITIVE}>:FN_HTTPS_TEST_CA_ADDITIVE=1>
         $<$<BOOL:${FN_BUILD_ATARI_SIO}>:FN_BUILD_ATARI_SIO>
         $<$<BOOL:${FN_BUILD_ATARI_PTY}>:FN_BUILD_ATARI_PTY>
         $<$<BOOL:${FN_BUILD_ATARI_NETSIO}>:FN_BUILD_ATARI_NETSIO>

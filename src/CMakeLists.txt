@@ -97,6 +97,7 @@ idf_component_register(
         platform/esp32/fuji_device_factory.cpp
         platform/esp32/hardware_caps.cpp
         platform/esp32/http_network_protocol_espidf.cpp
+        platform/esp32/https_trust_esp32.cpp
         platform/esp32/led_manager.cpp
         platform/esp32/legacy/iwm_bus_hardware.cpp
         platform/esp32/legacy/sio_bus_hardware.cpp
@@ -111,6 +112,7 @@ idf_component_register(
         platform/esp32/tcp_socket_ops_espidf.cpp
         platform/esp32/time.cpp
         platform/esp32/tinyusb_cdc.cpp
+        platform/esp32/tls_diagnostics.cpp
         platform/esp32/tls_network_protocol_espidf.cpp
         platform/esp32/uart_channel.cpp
         platform/esp32/udp_channel.cpp

@@ -333,6 +333,7 @@ extern "C" void app_main(void)
     esp_log_level_set("platform",    ESP_LOG_INFO);
     esp_log_level_set("service",     ESP_LOG_INFO);
     esp_log_level_set("tcp",         ESP_LOG_INFO);
+    esp_log_level_set("tls_diag",    ESP_LOG_INFO);
     esp_log_level_set("tnfs_fs",     ESP_LOG_INFO);
     esp_log_level_set("uart_ch",     ESP_LOG_INFO);
     esp_log_level_set("udp",         ESP_LOG_INFO);

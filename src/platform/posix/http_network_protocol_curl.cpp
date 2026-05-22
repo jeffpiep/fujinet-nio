@@ -10,6 +10,7 @@
 #include <string>
 
 #include "fujinet/core/logging.h"
+#include "fujinet/net/https_trust_config.h"
 #include "fujinet/net/test_ca_cert.h"
 
 // curl headers are only included in curl-specific files
@@ -75,6 +76,43 @@ CURLcode add_test_ca_sslctx_cb(CURL* curl, void* sslctx, void* /*userdata*/)
         return CURLE_SSL_CERTPROBLEM;
     }
     return append_test_ca_to_ssl_ctx(ctx) ? CURLE_OK : CURLE_SSL_CERTPROBLEM;
+}
+
+CURLcode replace_with_test_ca_sslctx_cb(CURL* curl, void* sslctx, void* /*userdata*/)
+{
+    (void)curl;
+    SSL_CTX* ctx = static_cast<SSL_CTX*>(sslctx);
+    if (!ctx) {
+        return CURLE_SSL_CERTPROBLEM;
+    }
+
+    X509_STORE* store = X509_STORE_new();
+    if (!store) {
+        return CURLE_SSL_CERTPROBLEM;
+    }
+
+    BIO* bio = BIO_new_mem_buf(fujinet::net::test_ca_cert_pem, -1);
+    if (!bio) {
+        X509_STORE_free(store);
+        return CURLE_SSL_CERTPROBLEM;
+    }
+
+    X509* cert = PEM_read_bio_X509(bio, nullptr, nullptr, nullptr);
+    BIO_free(bio);
+    if (!cert) {
+        X509_STORE_free(store);
+        return CURLE_SSL_CERTPROBLEM;
+    }
+
+    if (X509_STORE_add_cert(store, cert) != 1) {
+        X509_free(cert);
+        X509_STORE_free(store);
+        return CURLE_SSL_CERTPROBLEM;
+    }
+    X509_free(cert);
+
+    SSL_CTX_set_cert_store(ctx, store);
+    return CURLE_OK;
 }
 
 #endif
@@ -271,10 +309,12 @@ io::StatusCode HttpNetworkProtocolCurl::open(const io::NetworkOpenRequest& req)
     ensure_curl_global_init();
     _req = req;
 
-    const bool use_test_ca = true;
+    const auto trust_policy = fujinet::net::https_trust_policy();
     const std::string& cleanUrl = _req.url;
-    if (use_test_ca) {
+    if (trust_policy == fujinet::net::HttpsTrustPolicy::PlatformPlusTestCa) {
         FN_LOGD("platform", "HTTPS: Adding FujiNet Test CA to certificate verification store");
+    } else if (trust_policy == fujinet::net::HttpsTrustPolicy::TestCaOnly) {
+        FN_LOGD("platform", "HTTPS: Using FujiNet Test CA only");
     }
 
     const bool isPost = (_req.method == 2);
@@ -330,22 +370,32 @@ io::StatusCode HttpNetworkProtocolCurl::open(const io::NetworkOpenRequest& req)
     curl_easy_setopt(_curl, CURLOPT_FOLLOWLOCATION, follow ? 1L : 0L);
 
     // TLS verification configuration
-    if (use_test_ca) {
-        // Add embedded FujiNet Test CA in addition to system trust roots.
-        curl_easy_setopt(_curl, CURLOPT_SSL_VERIFYPEER, 1L);
-        curl_easy_setopt(_curl, CURLOPT_SSL_VERIFYHOST, 2L);
+    curl_easy_setopt(_curl, CURLOPT_SSL_VERIFYPEER, 1L);
+    curl_easy_setopt(_curl, CURLOPT_SSL_VERIFYHOST, 2L);
+
+    switch (trust_policy) {
+    case fujinet::net::HttpsTrustPolicy::PlatformDefault:
+#if FN_WITH_OPENSSL == 1
+        curl_easy_setopt(_curl, CURLOPT_SSL_CTX_FUNCTION, nullptr);
+#endif
+        break;
+
+    case fujinet::net::HttpsTrustPolicy::TestCaOnly:
+        curl_easy_setopt(_curl, CURLOPT_CAINFO, nullptr);
+#if FN_WITH_OPENSSL == 1
+        curl_easy_setopt(_curl, CURLOPT_SSL_CTX_FUNCTION, &replace_with_test_ca_sslctx_cb);
+#else
+        FN_LOGW("platform", "HTTPS: test CA only mode requires OpenSSL-backed curl");
+#endif
+        break;
+
+    case fujinet::net::HttpsTrustPolicy::PlatformPlusTestCa:
 #if FN_WITH_OPENSSL == 1
         curl_easy_setopt(_curl, CURLOPT_SSL_CTX_FUNCTION, &add_test_ca_sslctx_cb);
 #else
         FN_LOGW("platform", "HTTPS: FujiNet test CA additive trust is unavailable in this curl build without OpenSSL support");
 #endif
-    } else {
-        // Normal mode: use system CA certificates
-        curl_easy_setopt(_curl, CURLOPT_SSL_VERIFYPEER, 1L);
-        curl_easy_setopt(_curl, CURLOPT_SSL_VERIFYHOST, 2L);
-#if FN_WITH_OPENSSL == 1
-        curl_easy_setopt(_curl, CURLOPT_SSL_CTX_FUNCTION, nullptr);
-#endif
+        break;
     }
 
     // Reset request-body state

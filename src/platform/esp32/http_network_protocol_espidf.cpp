@@ -9,13 +9,13 @@
 #include <string>
 
 #include "fujinet/core/logging.h"
-#include "fujinet/net/test_ca_cert.h"
+#include "fujinet/platform/esp32/https_trust_esp32.h"
+#include "fujinet/platform/esp32/tls_diagnostics.h"
 
 extern "C" {
 #include "esp_timer.h"
 #include "esp_err.h"
 #include "esp_http_client.h"
-#include "esp_crt_bundle.h"
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -89,6 +89,7 @@ struct HttpNetworkProtocolEspIdfState {
     volatile bool stop_requested{false};
     volatile bool cancel_requested{false};
     volatile bool cleanup_pending{false};
+    bool tls_failure_logged{false};
 
     // Intrusive lifetime management:
     // - protocol object owns 1 ref
@@ -122,6 +123,7 @@ struct HttpNetworkProtocolEspIdfState {
         body_unknown_len = false;
 
         suppress_on_data = false;
+        tls_failure_logged = false;
     }
 
     std::string headers_block;
@@ -292,8 +294,25 @@ static esp_err_t event_handler(esp_http_client_event_t* evt)
     }
     
 
+    case HTTP_EVENT_ERROR: {
+        const auto* tls_err = static_cast<const esp_tls_last_error_t*>(evt->data);
+        if (!s->tls_failure_logged) {
+            log_tls_last_error("http_client", tls_err);
+            s->tls_failure_logged = true;
+        }
+        break;
+    }
+
     case HTTP_EVENT_ON_FINISH:
     case HTTP_EVENT_DISCONNECTED: {
+        if (evt->event_id == HTTP_EVENT_DISCONNECTED && evt->data && !s->tls_failure_logged) {
+            const auto* tls_err = static_cast<const esp_tls_last_error_t*>(evt->data);
+            if (tls_err->last_error != ESP_OK || tls_err->esp_tls_error_code != 0 || tls_err->esp_tls_flags != 0) {
+                log_tls_last_error("http_client_disconnect", tls_err);
+                s->tls_failure_logged = true;
+            }
+        }
+
         take_mutex(s->meta_mutex);
         set_status_and_length(*s);
         s->done = true;
@@ -329,6 +348,15 @@ static void http_task_entry(void* arg)
     esp_err_t err = ESP_FAIL;
     if (client) {
         err = esp_http_client_perform(client);
+        if (err != ESP_OK) {
+            char url_buf[256];
+            url_buf[0] = '\0';
+            if (esp_http_client_get_url(client, url_buf, sizeof(url_buf)) == ESP_OK) {
+                FN_LOGE(TAG, "http perform failed err=%d url=%s", static_cast<int>(err), url_buf);
+            } else {
+                FN_LOGE(TAG, "http perform failed err=%d", static_cast<int>(err));
+            }
+        }
     }
 
     // Update result metadata under mutex (but don't call set_status_and_length if client is gone).
@@ -525,12 +553,8 @@ fujinet::io::StatusCode HttpNetworkProtocolEspIdf::open(const fujinet::io::Netwo
     _s->err = ESP_OK;
     give_mutex(_s->meta_mutex);
 
-    const bool use_test_ca = true;
     std::string url = req.url;
-    if (use_test_ca) {
-        FN_LOGD(TAG, "HTTPS: Enabling additive FujiNet Test CA trust");
-    }
-    
+
     esp_http_client_config_t cfg{};
     cfg.url = url.c_str();
     cfg.event_handler = &event_handler;
@@ -545,14 +569,7 @@ fujinet::io::StatusCode HttpNetworkProtocolEspIdf::open(const fujinet::io::Netwo
 
     cfg.timeout_ms = 15000;
 
-    // TLS certificate verification configuration
-    if (use_test_ca) {
-        // ESP-IDF's HTTPS client selects either a provided PEM CA or the CRT bundle.
-        // Use the FujiNet test CA when requested so HTTPS behavior matches the test setup.
-        cfg.cert_pem = fujinet::net::test_ca_cert_pem;
-    } else {
-        cfg.crt_bundle_attach = esp_crt_bundle_attach;
-    }
+    configure_https_trust(cfg);
 
     const bool follow = (req.flags & 0x02) != 0;
     cfg.disable_auto_redirect = follow ? false : true;
@@ -603,7 +620,9 @@ fujinet::io::StatusCode HttpNetworkProtocolEspIdf::open(const fujinet::io::Netwo
         const int open_len = _s->body_unknown_len ? -1 : static_cast<int>(_s->expected_body_len);
         const esp_err_t e = esp_http_client_open(_s->client, open_len);
         if (e != ESP_OK) {
-            FN_LOGE(TAG, "open: esp_http_client_open failed err=%d", (int)e);
+            FN_LOGE(TAG, "open: esp_http_client_open failed err=%d url=%s",
+                    static_cast<int>(e), url.c_str());
+            log_device_time_context();
             esp_http_client_cleanup(_s->client);
             _s->client = nullptr;
             return fail(fujinet::io::StatusCode::IOError);
