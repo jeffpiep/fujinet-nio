@@ -788,6 +788,7 @@ class C_0011683483391837494806 {
 +close() : void
 +info(NetworkInfo & out) : StatusCode
 +open(const NetworkOpenRequest & req) : StatusCode
++openRequest() const noexcept : const NetworkOpenRequest &
 +poll() : void
 +read_body(std::uint32_t offset, std::uint8_t * out, std::size_t outLen, std::uint16_t & read, bool & eof) : StatusCode
 +write_body(std::uint32_t offset, const std::uint8_t * data, std::size_t dataLen, std::uint16_t & written) : StatusCode
@@ -1032,6 +1033,17 @@ __
 +gotIp : NetworkGotIp
 +kind : NetworkEventKind
 }
+abstract "net::INetworkLink" as C_0001548601329560013188
+abstract C_0001548601329560013188 {
++~INetworkLink() constexpr = default : void
+..
+{abstract} +connect(std::string ssid, std::string pass) = 0 : void
+{abstract} +disconnect() = 0 : void
+{abstract} +ip_address() const = 0 : std::string
+{abstract} +poll() = 0 : void
+{abstract} +state() const = 0 : LinkState
+__
+}
 abstract "net::ITcpSocketOps" as C_0000293687568532163494
 abstract C_0000293687568532163494 {
 +~ITcpSocketOps() constexpr = default : void
@@ -1112,6 +1124,13 @@ __
 -_state : State
 -_write_cursor : std::uint32_t
 }
+enum "net::LinkState" as C_0014292031979356073071
+enum C_0014292031979356073071 {
+Disconnected
+Connecting
+Connected
+Failed
+}
 enum "diag::DiagStatus" as C_0010514397783410162538
 enum C_0010514397783410162538 {
 Ok
@@ -1157,6 +1176,12 @@ abstract C_0007944674237235781138 {
 {abstract} +provider_id() const noexcept = 0 : std::string_view
 __
 }
+class "diag::NetworkDiagWifiContext" as C_0003130400837978442922
+class C_0003130400837978442922 {
+__
++ensure_wifi : std::function<net::INetworkLink *()>
++fuji : io::FujiDevice *
+}
 class "diag::DiagnosticRegistry" as C_0010263522683166994737
 class C_0010263522683166994737 {
 +DiagnosticRegistry() = default : void
@@ -1185,15 +1210,26 @@ __
 }
 class "diag::NetworkDiagnosticProvider" as C_0005339174589336306392
 class C_0005339174589336306392 {
-+NetworkDiagnosticProvider(core::FujinetCore & core) : void
++NetworkDiagnosticProvider(core::FujinetCore & core, std::shared_ptr<NetworkDiagWifiContext> wifi_ctx) : void
 ..
+-append_wifi_save_status(io::FujiDevice * fuji, DiagResult & r) : void
 -cmd_close(const DiagArgsView & args) : DiagResult
 -cmd_sessions() : DiagResult
+-cmd_wifi_get() : DiagResult
+-cmd_wifi_save() : DiagResult
+-cmd_wifi_scan() : DiagResult
+-cmd_wifi_set(const DiagArgsView & args) : DiagResult
+-cmd_wifi_status() : DiagResult
 +execute(const DiagArgsView & args) : DiagResult
+-fuji_device() const : io::FujiDevice *
+{static} -join_args(const DiagArgsView & args, std::size_t from) : std::string
 +list_commands(std::vector<DiagCommandSpec> & out) const : void
 +provider_id() const noexcept : std::string_view
+-reconnect_wifi() : DiagResult
+-wifi_link() const : net::INetworkLink *
 __
 -_core : core::FujinetCore &
+-_wifi_ctx : std::shared_ptr<NetworkDiagWifiContext>
 }
 class "diag::DiskDiagnosticProvider" as C_0002421237021206326705
 class C_0002421237021206326705 {
@@ -1431,12 +1467,15 @@ C_0011474842863539673819 o-- C_0001279065520068563954 : -_storageManager
 C_0011474842863539673819 o-- C_0010820187132968979160 : -_events
 C_0011340228097429469319 o-- C_0014656238790804323890 : +kind
 C_0011340228097429469319 o-- C_0003572434641464952782 : +gotIp
+C_0001548601329560013188 ..> C_0014292031979356073071
 C_0018080614400737831579 ..> C_0012496700434923238249
 C_0018080614400737831579 --> C_0000293687568532163494 : -_socket_ops
 C_0011046427244206106114 o-- C_0010514397783410162538 : +status
 C_0007944674237235781138 ..> C_0014265545497805753192
 C_0007944674237235781138 ..> C_0018340176854803608744
 C_0007944674237235781138 ..> C_0011046427244206106114
+C_0003130400837978442922 --> C_0016024516082849980408 : +fuji
+C_0003130400837978442922 ..> C_0001548601329560013188 : +ensure_wifi
 C_0010263522683166994737 ..> C_0014265545497805753192
 C_0010263522683166994737 ..> C_0018340176854803608744
 C_0010263522683166994737 ..> C_0011046427244206106114
@@ -1449,7 +1488,10 @@ C_0007944674237235781138 <|-- C_0004415785026504276688
 C_0005339174589336306392 ..> C_0014265545497805753192
 C_0005339174589336306392 ..> C_0018340176854803608744
 C_0005339174589336306392 ..> C_0011046427244206106114
+C_0005339174589336306392 ..> C_0016024516082849980408
+C_0005339174589336306392 ..> C_0001548601329560013188
 C_0005339174589336306392 --> C_0011474842863539673819 : -_core
+C_0005339174589336306392 --> C_0003130400837978442922 : -_wifi_ctx
 C_0007944674237235781138 <|-- C_0005339174589336306392
 C_0002421237021206326705 ..> C_0014265545497805753192
 C_0002421237021206326705 ..> C_0018340176854803608744

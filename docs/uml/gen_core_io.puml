@@ -524,6 +524,13 @@ __
 -_config : TranslationConfig
 -_translated : std::string
 }
+enum "io::RequestContentProfile" as C_0014462224694841349318
+enum C_0014462224694841349318 {
+None
+JsonBody
+FormBody
+TextBody
+}
 class "io::bytecodec::Reader" as C_0001552565821524910243
 class C_0001552565821524910243 {
 +Reader(const std::uint8_t * data, std::size_t size) : void
@@ -543,6 +550,12 @@ __
 -_begin : const std::uint8_t *
 -_end : const std::uint8_t *
 -_p : const std::uint8_t *
+}
+class "io::OpenExtensions" as C_0015834173540824165561
+class C_0015834173540824165561 {
+__
++contentProfile : RequestContentProfile
++translation : TranslationConfig
 }
 class "io::ModemDevice" as C_0012713930330229444348
 class C_0012713930330229444348 {
@@ -662,6 +675,7 @@ class C_0011683483391837494806 {
 +close() : void
 +info(NetworkInfo & out) : StatusCode
 +open(const NetworkOpenRequest & req) : StatusCode
++openRequest() const noexcept : const NetworkOpenRequest &
 +poll() : void
 +read_body(std::uint32_t offset, std::uint8_t * out, std::size_t outLen, std::uint16_t & read, bool & eof) : StatusCode
 +write_body(std::uint32_t offset, const std::uint8_t * data, std::size_t dataLen, std::uint16_t & written) : StatusCode
@@ -896,6 +910,8 @@ C_0016910926688454257733 ..> C_0005932353517374970487
 C_0006788839814876680044 ..> C_0012496700434923238249
 C_0006788839814876680044 o-- C_0011628969558439618672 : -_config
 C_0017172268465975245210 <|-- C_0006788839814876680044
+C_0015834173540824165561 o-- C_0011628969558439618672 : +translation
+C_0015834173540824165561 o-- C_0014462224694841349318 : +contentProfile
 C_0012713930330229444348 ..> C_0002386736627821114488
 C_0012713930330229444348 ..> C_0002942984525013396621
 C_0012713930330229444348 ..> C_0012496700434923238249
