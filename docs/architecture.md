@@ -49,6 +49,11 @@ At the heart of the design is a clean separation between:
 
 This replaces the previous macro-heavy, platform-entangled architecture with a testable, layered core.
 
+Related focused docs:
+
+- [`docs/build_profiles.md`](build_profiles.md) - how build flags select machine, transport, and channel
+- [`docs/posix_tcp_serial_channel.md`](posix_tcp_serial_channel.md) - FujiBus over TCP serial for emulator and QEMU workflows
+
 ---
 
 # **Design Principles**
@@ -234,11 +239,32 @@ public:
 | Platform | Channel implementation |
 |----------|------------------------|
 | POSIX    | `PtyChannel` (in `platform/posix/channel_factory.cpp`) |
+| POSIX    | `TcpServerChannel` (in `platform/posix/channel_factory.cpp`) |
 | ESP32-S3 | `UsbCdcChannel` (in `platform/esp32/usb_cdc_channel.cpp`) |
-| Future   | TCP channels, UART-based SIO, WebUSB, emulator pipes |
+| Future   | UART-based SIO, WebUSB, emulator pipes |
 
 Channels are platform-specific and discovered via **channel factories**.  
 Core code only uses the `Channel` interface.
+
+### POSIX TCP serial channel
+
+The POSIX `TcpServerChannel` is a raw byte channel for emulator workflows. It
+does not implement FujiBus, SLIP, disk commands, or device semantics. It only
+accepts a TCP client and presents that socket through the common `Channel` API.
+
+The `fujibus-tcp-*` presets select:
+
+- `TransportKind::FujiBus`
+- `ChannelKind::TcpSocket`
+- profile name `POSIX + FujiBus over TCP serial`
+
+At runtime, `src/platform/posix/channel_factory.cpp` reads
+`FujiConfig.channel.tcpHost` and `FujiConfig.channel.tcpPort`, creates a
+listening TCP socket, accepts one client, and returns to listening after client
+disconnects. FujiBus/SLIP framing remains entirely in `FujiBusTransport`.
+
+See [`docs/posix_tcp_serial_channel.md`](posix_tcp_serial_channel.md) for
+configuration and QEMU/MS-DOS usage notes.
 
 ---
 
@@ -826,13 +852,19 @@ Core logic then decides:
 - Entry point: `src/app/main_posix.cpp`
 - Uses:
   - `build::current_build_profile()`
-  - `platform::create_channel_for_profile(profile)`
-  - `core::setup_transports(core, *channel, profile)`
+  - `platform::create_channel_for_profile(profile, config)`
+  - `core::setup_transports(core, *channel, profile, &config)`
 - Implements:
   - `PtyChannel` in `platform/posix/channel_factory.cpp`
+  - `TcpServerChannel` in `platform/posix/channel_factory.cpp`
   - POSIX `logging.cpp`
   - POSIX `hardware_caps.cpp`
   - POSIX config store factory (YAML on normal filesystem)
+
+For `fujibus-tcp-debug` and `fujibus-tcp-release`, POSIX runs FujiBus over a
+TCP server channel. The emulator or QEMU side connects as a TCP client and sees
+a serial-like byte stream. This keeps emulator transport concerns below
+`FujiBusTransport`; virtual devices still receive ordinary `IORequest` objects.
 
 Loop:
 
@@ -840,9 +872,10 @@ Loop:
 int main() {
     FujinetCore core;
     auto profile = build::current_build_profile();
-    auto channel = platform::create_channel_for_profile(profile);
+    auto config = load_config();
+    auto channel = platform::create_channel_for_profile(profile, config);
 
-    core::setup_transports(core, *channel, profile);
+    core::setup_transports(core, *channel, profile, &config);
 
     while (true) {
         core.tick();
@@ -872,9 +905,10 @@ extern "C" void app_main(void)
 
     core::FujinetCore core;
     auto profile = build::current_build_profile();
+    auto config = load_config();
 
-    auto channel = platform::create_channel_for_profile(profile);
-    core::setup_transports(core, *channel, profile);
+    auto channel = platform::create_channel_for_profile(profile, config);
+    core::setup_transports(core, *channel, profile, &config);
 
     // Register devices, including FujiDevice (config, reset, etc.)
 

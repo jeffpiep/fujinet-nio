@@ -13,6 +13,7 @@ This repo is **fujinet-nio**, a clean rewrite of FujiNet firmware. It targets mu
 ## Start here (high-signal docs)
 
 - **Architecture overview**: `docs/architecture.md`
+- **POSIX TCP serial channel**: `docs/posix_tcp_serial_channel.md` (FujiBus over TCP for emulator/QEMU workflows)
 - **Protocol references**:
   - `docs/protocol_reference.md`
   - `docs/network_device_protocol.md` (good exemplar for a v1 binary protocol doc)
@@ -31,6 +32,10 @@ This repo is **fujinet-nio**, a clean rewrite of FujiNet firmware. It targets mu
 - **Storage/filesystems**:
   - `include/fujinet/fs/storage_manager.h`
   - `include/fujinet/fs/filesystem.h`
+- **Build profiles / channels**:
+  - `include/fujinet/build/profile.h`
+  - `src/lib/build_profile.cpp`
+  - `src/platform/posix/channel_factory.cpp`
 - **Diagnostics**:
   - `include/fujinet/diag/diagnostic_provider.h`
   - `include/fujinet/diag/diagnostic_registry.h`

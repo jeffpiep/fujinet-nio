@@ -71,7 +71,7 @@ enum class TransportKind {
 enum class ChannelKind {
     Pty,          // POSIX PTY (dev/testing)
     UsbCdcDevice, // USB CDC device mode (ESP32S3, Pi gadget mode later)
-    TcpSocket,    // TCP/IP channel for emulators (future)
+    TcpSocket,    // TCP/IP serial channel for emulators/QEMU
     UdpSocket,    // UDP socket (for NetSIO protocol)
     UartGpio,     // ESP32 GPIO-based UART (SIO, RS232, etc.)
 };
@@ -139,6 +139,14 @@ BuildProfile current_build_profile()
         .primaryTransport = TransportKind::FujiBus,
         .primaryChannel   = ChannelKind::Pty,
         .name             = "POSIX + FujiBus over PTY",
+        .hw               = {},
+    };
+#elif defined(FN_BUILD_FUJIBUS_TCP)
+    profile = BuildProfile{
+        .machine          = Machine::Generic,
+        .primaryTransport = TransportKind::FujiBus,
+        .primaryChannel   = ChannelKind::TcpSocket,
+        .name             = "POSIX + FujiBus over TCP serial",
         .hw               = {},
     };
 #else
@@ -229,7 +237,8 @@ File: `include/fujinet/core/bootstrap.h`
 io::ITransport* setup_transports(
     FujinetCore& core,
     io::Channel& channel,
-    const build::BuildProfile& profile
+    const build::BuildProfile& profile,
+    const config::FujiConfig* config = nullptr
 );
 ```
 
@@ -261,13 +270,16 @@ switch (profile.primaryTransport) {
 
 ```cpp
 std::unique_ptr<io::Channel>
-create_channel_for_profile(const BuildProfile& profile)
+create_channel_for_profile(const BuildProfile& profile, const FujiConfig& config)
 {
     switch (profile.primaryChannel) {
         case ChannelKind::Pty:
             return create_pty_channel();
         case ChannelKind::TcpSocket:
-            return create_tcp_channel();
+            return std::make_unique<TcpServerChannel>(
+                config.channel.tcpHost,
+                config.channel.tcpPort
+            );
         default:
             return nullptr;
     }
@@ -401,15 +413,16 @@ Currently supported profiles:
   - `primaryChannel   = ChannelKind::Pty`  
   - POSIX dev / test build with FujiBus over a PTY.
 
-Exactly **one** of these must be defined when building the core. If none is
-defined, `build_profile.cpp` triggers a compile-time error via:
+- `FN_BUILD_FUJIBUS_TCP`
+  - `machine          = Machine::Generic`
+  - `primaryTransport = TransportKind::FujiBus`
+  - `primaryChannel   = ChannelKind::TcpSocket`
+  - POSIX emulator / QEMU build with FujiBus over a TCP serial socket.
+  - CMake preset: `fujibus-tcp-debug` / `fujibus-tcp-release`
 
-```cpp
-#error "No build profile selected. Define one of: \
-FN_BUILD_ATARI_SIO, FN_BUILD_ATARI_PTY, FN_BUILD_ATARI_NETSIO, FN_BUILD_ESP32_USB_CDC, FN_BUILD_FUJIBUS_PTY."
-```
-
-This ensures we never silently “default” to some arbitrary environment.
+Prefer defining exactly **one** profile macro when building an application. If
+no profile macro is defined, `build_profile.cpp` currently falls back to the
+POSIX-friendly FujiBus-over-PTY profile so local library/test builds still work.
 
 ### FN_DEBUG and logging
 
@@ -432,6 +445,7 @@ target_compile_definitions(fujinet-nio
         $<$<BOOL:${FN_BUILD_ATARI_PTY}>:FN_BUILD_ATARI_PTY>
         $<$<BOOL:${FN_BUILD_ATARI_NETSIO}>:FN_BUILD_ATARI_NETSIO>
         $<$<BOOL:${FN_BUILD_FUJIBUS_PTY}>:FN_BUILD_FUJIBUS_PTY>
+        $<$<BOOL:${FN_BUILD_FUJIBUS_TCP}>:FN_BUILD_FUJIBUS_TCP>
 )
 ```
 
@@ -473,6 +487,7 @@ option(FN_BUILD_ATARI_PTY         "Build for Atari SIO over PTY (POSIX)" OFF)
 option(FN_BUILD_ATARI_NETSIO      "Build for Atari SIO over NetSIO/UDP (POSIX)" OFF)
 option(FN_BUILD_ESP32_USB_CDC     "Build for ESP32 USB CDC profile"      OFF)
 option(FN_BUILD_FUJIBUS_PTY       "Build for POSIX FujiBus over PTY"     OFF)
+option(FN_BUILD_FUJIBUS_TCP       "Build for POSIX FujiBus over TCP"     OFF)
 ```
 
 You pass them on the CMake configure line:
@@ -482,6 +497,11 @@ You pass them on the CMake configure line:
 cmake -B build/posix-fujibus-pty-debug \
       -DCMAKE_BUILD_TYPE=Debug \
       -DFN_BUILD_FUJIBUS_PTY=ON
+
+# POSIX FujiBus over TCP serial, Debug build
+cmake -B build/posix-fujibus-tcp-debug \
+      -DCMAKE_BUILD_TYPE=Debug \
+      -DFN_BUILD_FUJIBUS_TCP=ON
 
 # Atari SIO via GPIO (ESP32), Release build
 cmake -B build/atari-sio-release \
@@ -503,11 +523,49 @@ cmake -B build/atari-netsio-debug \
 # Or use CMakePresets.json:
 cmake --preset atari-netsio-debug
 cmake --build --preset atari-netsio-debug-build
+
+cmake --preset fujibus-tcp-debug
+cmake --build --preset fujibus-tcp-debug-build
 ```
 
 The `target_compile_definitions(fujinet-nio ...)` call then turns those options
 into real `-DFN_BUILD_…` defines for all code that links `fujinet-nio`
 (including tests).
+
+## POSIX FujiBus over TCP serial configuration
+
+`FN_BUILD_FUJIBUS_TCP` selects `TransportKind::FujiBus` and
+`ChannelKind::TcpSocket`. The POSIX channel factory creates a TCP **server**
+channel, not a client channel. This matches emulator workflows where the
+emulator owns the virtual serial port and connects outward to FujiNet-NIO.
+
+YAML keys:
+
+```yaml
+channel:
+  tcp_host: "127.0.0.1"
+  tcp_port: 65504
+```
+
+Defaults are `127.0.0.1:65504`. Bind to `0.0.0.0` only when an external client
+must connect; the TCP channel exposes a raw FujiBus serial byte stream and has
+no authentication layer.
+
+Runtime path:
+
+1. `build::current_build_profile()` selects `ChannelKind::TcpSocket`.
+2. `src/app/main_posix.cpp` loads `fujinet.yaml` via `FujiDevice`.
+3. `platform::create_channel_for_profile(profile, config)` creates
+   `TcpServerChannel(config.channel.tcpHost, config.channel.tcpPort)`.
+4. `core::setup_transports(...)` attaches `FujiBusTransport` to that channel.
+5. QEMU or another emulator connects as a TCP client and exchanges FujiBus+SLIP
+   frames.
+
+The TCP channel does not know about MS-DOS, DiskDevice, or NetworkDevice. It is
+only the byte pipe below FujiBus.
+
+See [`docs/posix_tcp_serial_channel.md`](posix_tcp_serial_channel.md) for the
+full integration note.
 
 #### ESP32 (PlatformIO)
 

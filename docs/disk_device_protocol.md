@@ -88,6 +88,8 @@ v1 includes (image-format understanding required for sector I/O):
 - **Raw** (`ImageType::Raw`): flat `sector_count * sector_size` bytes, **no header**
   - used for tests and tooling
   - requires `sectorSizeHint` (default 256 if not provided)
+  - persisted config mounts can provide `sector_size_hint` so raw images can be
+    exposed with non-default sector sizes such as 512-byte DOS/FAT sectors
 
 - **SSD** (`ImageType::Ssd`, `.ssd`): BBC DFS SSD image (flat 256-byte sectors)
   - supported sizes (validated on mount):
@@ -277,6 +279,36 @@ Mount policy notes:
 - DiskDevice `Mount` carries the **live** access request.
 - If `bit0` is clear, the service may try writable access first and then fall back to read-only.
 - The actual outcome is reported in response `flags bit1` (`readonly_effective`).
+
+## Persisted config mounts
+
+Runtime configuration can define mounts in `fujinet.yaml`. These are applied at
+startup by `apply_config_mounts()` after `DiskDevice` has been registered. The
+mount is intentionally lazy: the config is stored as a pending mount and the
+image file is opened on first sector read/write.
+
+Example:
+
+```yaml
+mounts:
+  - slot: 1
+    uri: "host:/dos/fn-dos.img"
+    mode: "rw"
+    enabled: true
+    sector_size_hint: 512
+```
+
+Fields:
+
+- `slot`: 1-based disk slot (`1` maps to internal slot index `0`)
+- `uri`: full storage URI resolved through `StorageManager`
+- `mode`: `r` or `rw`; `rw` attempts writable open and may fall back read-only
+- `enabled`: disabled mounts are skipped
+- `sector_size_hint`: optional raw-image sector size hint; `0` or omission uses
+  the image default
+
+For MS-DOS/FAT raw disk images, use `sector_size_hint: 512`. Without this hint,
+raw images default to 256-byte sectors for historical 8-bit workflows.
 
 ---
 
