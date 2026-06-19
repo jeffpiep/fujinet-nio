@@ -464,9 +464,10 @@ class C_0016024516082849980408 {
 +config_mut() : config::FujiConfig &
 +config_store() : config::FujiConfigStore *
 {static} -encode_mount_record(std::uint8_t slotIndex, const std::string & uri, const std::string & mode, bool enabled) : std::vector<std::uint8_t>
--find_mount_by_slot_number(int slot) : config::MountConfig *
--find_mount_by_slot_number(int slot) const : const config::MountConfig *
-{static} -format_mount_line(int slotNumber, std::string_view uri, std::string_view mode, bool enabled) : std::string
+-find_mount_by_slot_number(int slotNumber) const : const config::MountConfig *
+-find_mount_by_slot_number(int slotNumber) : config::MountConfig *
+{static} -format_mount_line(int slotLabel, std::string_view uri, std::string_view mode, bool enabled) : std::string
+{static} -formatted_mount_slot_label(const config::MountConfig & mount) : int
 +handle(const IORequest & request) : IOResponse
 -handle_get_mount(const IORequest & request) : IOResponse
 -handle_get_mounts(const IORequest & request) : IOResponse
@@ -743,6 +744,7 @@ class C_0007310215371924962169 {
 __
 +enabled : bool
 +mode : std::string
++sectorSizeHint : std::uint16_t
 +uri : std::string
 }
 class "disk::DiskService" as C_0014804734580910690913
@@ -757,7 +759,7 @@ class C_0014804734580910690913 {
 +mount(std::size_t slotIndex, const std::string & fsName, const std::string & path, const MountOptions & opts) : DiskResult
 +read_sector(std::size_t slotIndex, std::uint32_t lba, std::uint8_t * dst, std::size_t dstBytes) : DiskResult
 -set_error(std::size_t slotIndex, DiskError e) : DiskError
-+set_pending_mount(std::size_t slotIndex, const std::string & uri, const std::string & mode, bool enabled) : void
++set_pending_mount(std::size_t slotIndex, const std::string & uri, const std::string & mode, bool enabled, std::uint16_t sectorSizeHint = 0) : void
 +slot_count() const noexcept : std::size_t
 -slot_ptr(std::size_t slotIndex) : Slot *
 -slot_ptr(std::size_t slotIndex) const : const Slot *
@@ -863,10 +865,11 @@ __
 class "config::MountConfig" as C_0013943630642961179492
 class C_0013943630642961179492 {
 +effective_slot() const : int
-{static} +from_index(int index) constexpr : int
+{static} +from_index(int slotIndex) constexpr : int
 __
 +enabled : bool
 +mode : std::string
++sectorSizeHint : std::uint16_t
 +slot : int
 +uri : std::string
 }
@@ -904,6 +907,8 @@ class "config::ChannelConfig" as C_0014601375190208620155
 class C_0014601375190208620155 {
 __
 +ptyPath : std::string
++tcpHost : std::string
++tcpPort : std::uint16_t
 +uart : UartConfig
 }
 class "config::FujiConfig" as C_0013064010099190715901

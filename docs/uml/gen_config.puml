@@ -24,10 +24,11 @@ __
 class "config::MountConfig" as C_0013943630642961179492
 class C_0013943630642961179492 {
 +effective_slot() const : int
-{static} +from_index(int index) constexpr : int
+{static} +from_index(int slotIndex) constexpr : int
 __
 +enabled : bool
 +mode : std::string
++sectorSizeHint : std::uint16_t
 +slot : int
 +uri : std::string
 }
@@ -91,6 +92,8 @@ class "config::ChannelConfig" as C_0014601375190208620155
 class C_0014601375190208620155 {
 __
 +ptyPath : std::string
++tcpHost : std::string
++tcpPort : std::uint16_t
 +uart : UartConfig
 }
 class "config::FujiConfig" as C_0013064010099190715901
