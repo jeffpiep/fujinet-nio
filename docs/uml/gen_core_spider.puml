@@ -751,13 +751,16 @@ class "disk::DiskService" as C_0014804734580910690913
 class C_0014804734580910690913 {
 +DiskService(fs::StorageManager & storage, ImageRegistry registry) : void
 ..
+-activate_pending_mount(std::size_t slotIndex) : DiskResult
 +clear_changed(std::size_t slotIndex) : void
 +clear_pending_mount(std::size_t slotIndex) : void
 +create_image(const std::string & fsName, const std::string & path, ImageType type, std::uint16_t sectorSize, std::uint32_t sectorCount, bool overwrite) : DiskResult
++ensure_mounted(std::size_t slotIndex) : DiskResult
 +get_pending_mount(std::size_t slotIndex) const : std::optional<PendingMountInfo>
 +info(std::size_t slotIndex) const : DiskSlotInfo
 +mount(std::size_t slotIndex, const std::string & fsName, const std::string & path, const MountOptions & opts) : DiskResult
 +read_sector(std::size_t slotIndex, std::uint32_t lba, std::uint8_t * dst, std::size_t dstBytes) : DiskResult
++read_sectors(std::size_t slotIndex, std::uint32_t lba, std::uint16_t count, std::uint8_t * dst, std::size_t dstBytes) : DiskResult
 -set_error(std::size_t slotIndex, DiskError e) : DiskError
 +set_pending_mount(std::size_t slotIndex, const std::string & uri, const std::string & mode, bool enabled, std::uint16_t sectorSizeHint = 0) : void
 +slot_count() const noexcept : std::size_t
@@ -765,6 +768,7 @@ class C_0014804734580910690913 {
 -slot_ptr(std::size_t slotIndex) const : const Slot *
 +unmount(std::size_t slotIndex) : DiskResult
 +write_sector(std::size_t slotIndex, std::uint32_t lba, const std::uint8_t * src, std::size_t srcBytes) : DiskResult
++write_sectors(std::size_t slotIndex, std::uint32_t lba, std::uint16_t count, const std::uint8_t * src, std::size_t srcBytes) : DiskResult
 __
 {static} +MAX_SLOTS : const std::size_t
 -_registry : ImageRegistry
