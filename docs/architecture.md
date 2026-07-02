@@ -1,6 +1,6 @@
 # **FujiNet-NIO Architecture Document**
 
-*Version 1.1 — Updated 2025-12-05*
+*Version 1.2 — Updated 2026-07-02*
 
 ---
 
@@ -45,7 +45,7 @@ At the heart of the design is a clean separation between:
 | **Channels** | Raw byte I/O (USB CDC, PTY, TCP, UART, …) |
 | **Transports** | Framing (SLIP), FujiBus encode/decode → IORequest/IOResponse |
 | **Core** | Request routing, ticking, device lifecycle |
-| **Devices** | Virtual devices (Disk, Fuji config, Network, Printer, …) |
+| **Devices** | Virtual devices (Fuji config, File/App Store, Clock, Disk, Network, Modem, …) |
 
 This replaces the previous macro-heavy, platform-entangled architecture with a testable, layered core.
 
@@ -139,7 +139,7 @@ Only a thin platform layer differs.
                       │
                       ▼
            VirtualDevice subsystem
-  Disk, Fuji config, Network, Printer, CP/M, etc.
+  Fuji config, File/App Store, Clock, Disk, Network, Modem, etc.
                       │
                       ▼
       Transport encodes IOResponse → Channel.write()
@@ -296,7 +296,7 @@ class FujiBusTransport : public ITransport {
 public:
     explicit FujiBusTransport(Channel& ch);
 
-    bool poll() override;
+    void poll() override;
     bool receive(IORequest& out) override;
     void send(const IOResponse& resp) override;
 };
@@ -371,12 +371,15 @@ If a `DeviceID` is not registered, `handleRequest()` returns an `IOResponse` wit
 
 ## **5. VirtualDevice (abstract device API)**
 
-Devices represent logical endpoints for the host:
+Devices represent logical endpoints for the host. The POSIX app currently
+registers:
 
-- Fuji core/config device
-- Disk / Host slot device
-- Network device
-- Printer, CP/M, modem, etc.
+- `FujiDevice` for core/config/reset behavior (`WireDeviceId::FujiNet`, 0x70)
+- `FileDevice` for filesystem commands and app-store commands (`FileService`, 0xFE)
+- `ClockDevice` for time/date commands (`Clock`, 0x45)
+- `DiskDevice` for image mounting and sector I/O (`DiskService`, 0xFC)
+- `NetworkDevice` for handle-based network sessions (`NetworkService`, 0xFD)
+- `ModemDevice` for modem-style network workflows (`ModemService`, 0xFB)
 
 ### API
 
@@ -447,7 +450,9 @@ public:
 
     IODeviceManager& deviceManager();
     IOService&       ioService();
-    RoutingManager&  routing();
+    RoutingManager&  routingManager();
+    StorageManager&  storageManager();
+    SystemEvents&    events();
 
     void addTransport(io::ITransport* t);
     void tick();
@@ -458,6 +463,8 @@ private:
     IODeviceManager _deviceManager;
     RoutingManager  _routing;
     IOService       _ioService;
+    StorageManager  _storageManager;
+    SystemEvents    _events;
 };
 ```
 
@@ -540,6 +547,7 @@ A VirtualDevice may receive:
 - `RoutingManager&`
 - `FujiConfigStore`
 - network or filesystem facades
+- event streams exposed through `SystemEvents`
 - any other well-defined, platform-agnostic interfaces
 
 ### What Devices Must Not Depend On
@@ -580,6 +588,7 @@ enum class Machine {
 enum class TransportKind {
     FujiBus,
     SIO,
+    IWM,
     IEC,
 };
 
@@ -587,9 +596,10 @@ enum class ChannelKind {
     Pty,
     UsbCdcDevice,
     TcpSocket,
+    UdpSocket,
+    UartGpio,
+    SerialPort,
 };
-
-struct HardwareCapabilities; // see later
 
 struct BuildProfile {
     Machine              machine;
@@ -626,12 +636,36 @@ BuildProfile current_build_profile()
         .name             = "Atari + SIO over PTY (POSIX)",
     };
 
+#elif defined(FN_BUILD_ATARI_NETSIO)
+    BuildProfile p{
+        .machine          = Machine::Atari8Bit,
+        .primaryTransport = TransportKind::SIO,
+        .primaryChannel   = ChannelKind::UdpSocket,
+        .name             = "Atari + SIO over NetSIO (UDP)",
+    };
+
 #elif defined(FN_BUILD_ESP32_USB_CDC)
     BuildProfile p{
         .machine          = Machine::FujiNetESP32,
         .primaryTransport = TransportKind::FujiBus,
         .primaryChannel   = ChannelKind::UsbCdcDevice,
         .name             = "ESP32-S3 + FujiBus over USB CDC",
+    };
+
+#elif defined(FN_BUILD_FUJIBUS_TCP)
+    BuildProfile p{
+        .machine          = Machine::Generic,
+        .primaryTransport = TransportKind::FujiBus,
+        .primaryChannel   = ChannelKind::TcpSocket,
+        .name             = "POSIX + FujiBus over TCP serial",
+    };
+
+#elif defined(FN_BUILD_AMIGA_RS232)
+    BuildProfile p{
+        .machine          = Machine::Generic,
+        .primaryTransport = TransportKind::FujiBus,
+        .primaryChannel   = ChannelKind::SerialPort,
+        .name             = "POSIX + FujiBus over RS-232 (Amiga prototype)",
     };
 
 #else
@@ -648,7 +682,10 @@ BuildProfile current_build_profile()
 }
 ```
 
-**This file is the only place in the codebase that reads `FN_BUILD_*` macros.**
+`src/lib/build_profile.cpp` is the central place that maps `FN_BUILD_*` profile
+macros into `BuildProfile`. Platform build files still use profile macros to
+select sources and compile definitions, but shared runtime code consumes the
+resulting `BuildProfile` rather than scattering profile conditionals.
 
 ---
 
@@ -833,15 +870,11 @@ struct MemoryCapabilities {
     bool hasDedicatedLargePool        {false};
 };
 
-struct UsbCapabilities {
-    bool hasUsbDevice{false};
-    bool hasUsbHost  {false};
-};
-
 struct HardwareCapabilities {
     NetworkCapabilities network;
     MemoryCapabilities  memory;
-    UsbCapabilities     usb;
+    bool hasUsbDevice{false};
+    bool hasUsbHost  {false};
 };
 ```
 
@@ -876,9 +909,11 @@ Core logic then decides:
 - Implements:
   - `PtyChannel` in `platform/posix/channel_factory.cpp`
   - `TcpServerChannel` in `platform/posix/channel_factory.cpp`
+  - `SerialChannel` in `platform/posix/channel_factory.cpp`
   - POSIX `logging.cpp`
   - POSIX `hardware_caps.cpp`
   - POSIX config store factory (YAML on normal filesystem)
+  - POSIX filesystem factories for `host:`, `tnfs:`, `http:`, and `https:`
 
 For `fujibus-tcp-debug` and `fujibus-tcp-release`, POSIX runs FujiBus over a
 TCP server channel. The emulator or QEMU side connects as a TCP client and sees
@@ -902,6 +937,9 @@ int main() {
     }
 }
 ```
+
+POSIX also creates a cooperative diagnostic console and registers diagnostic
+providers for core, network, disk, modem, and app-store state.
 
 ---
 
@@ -986,16 +1024,14 @@ Example:
 
 ```
 enum class WireDeviceId : std::uint8_t {
-    FujiNet     = 0x70,
-    DiskFirst   = 0x31,
-    DiskLast    = 0x3F,
-    NetworkFirst= 0x71,
-    NetworkLast = 0x78,
+    FujiNet         = 0x70,
+    Clock           = 0x45,
 
     // FujiNet-NIO extensions
-    DiskService = 0xFC,
-    NetworkService = 0xFD,
-    FileService = 0xFE,
+    ModemService    = 0xFB,
+    DiskService     = 0xFC,
+    NetworkService  = 0xFD,
+    FileService     = 0xFE,
 };
 ```
 
@@ -1088,8 +1124,18 @@ inline FujiCommand to_fuji_command(std::uint16_t raw)
 
 ```
 enum class FileCommand : std::uint8_t {
-    ListDirectory = 0x01,
-    // future: Open, Read, Write, Remove, etc.
+    Stat           = 0x01,
+    ListDirectory  = 0x02,
+    ReadFile       = 0x03,
+    WriteFile      = 0x04,
+    ResolvePath    = 0x05,
+    MakeDirectory  = 0x06,
+
+    AppStoreStat   = 0x20,
+    AppStoreRead   = 0x21,
+    AppStoreWrite  = 0x22,
+    AppStoreDelete = 0x23,
+    AppStoreList   = 0x24,
 };
 
 inline FileCommand to_file_command(std::uint16_t raw)
@@ -1106,6 +1152,30 @@ Key principles:
 - 8-bit command devices intentionally ignore the high byte
 - This enables compatibility with legacy 8-bit protocols
 - Devices with future 16-bit command spaces can opt in explicitly
+
+---
+
+## File System and App Store Architecture
+
+FujiNet-NIO exposes file-oriented services through `StorageManager` and named
+filesystem providers. POSIX currently registers:
+
+- `host:` backed by normal files under `./fujinet-data`
+- `tnfs:` backed by the TNFS client
+- `http:` / `https:` backed by dynamic URL filesystem providers
+
+`FileDevice` is the host-facing virtual device for generic filesystem
+operations. Its app-store commands provide key/value-style application storage
+on top of the same filesystem semantics rather than lifting legacy 64-byte
+appkeys into the core model.
+
+App-store data is implemented by `AppStore`, backed by `StorageManager`, and is
+also exposed through a diagnostic provider for listing, reading, deleting, and
+other administrative workflows.
+
+Related docs:
+
+- [`docs/file_device_protocol.md`](file_device_protocol.md)
 
 ---
 
@@ -1143,12 +1213,18 @@ Transport → IORequest → RoutingManager → IODeviceManager → VirtualDevice
 - SLIP encode/decode
 - FujiBus packet parsing
 - IODeviceManager routing and error cases
-- Individual VirtualDevices (e.g., FujiDevice config parsing)
+- Build profile mapping
+- Channel behavior, including POSIX TCP and serial channels
+- Individual VirtualDevices (FujiDevice, FileDevice, ClockDevice, DiskDevice, NetworkDevice, ModemDevice)
+- Filesystem behavior and app-store protocol coverage
+- Diagnostic providers and Python tooling
 
 ## Integration Tests (POSIX)
 
-- PTY-based tests using Python scripts (invoke via `scripts/fujinet`)
+- CTest-driven POSIX test binaries for debug presets
+- Python tests for `py/fujinet_tools`
 - End-to-end FujiBus → IORequest → VirtualDevice → IOResponse → bytes
+- QEMU/MS-DOS workflows are orchestrated outside this repo by the workspace
 
 ## ESP32 Hardware Tests
 
@@ -1199,26 +1275,33 @@ network availability, time synchronization, or other cross-cutting conditions.
 
 # **Future Enhancements**
 
-1. **Additional transports**
-   - Full SIO and IEC transports
-   - TCP-based transport for emulators and testing
+1. **Additional legacy transports and profiles**
+   - IWM and IEC transports
+   - More complete SIO hardware profiles beyond the current POSIX PTY/NetSIO paths
 
-2. **Expanded device set**
-   - CP/M device
-   - Rich Network device (TNFS, HTTP, HTTPS)
-   - Printer and modem devices
+2. **Expanded device set and protocol depth**
+   - Printer device
+   - CP/M or other machine-specific devices if real host workflows need them
+   - Continued modem-device compatibility work
+   - Deeper NetworkDevice protocol coverage for additional schemes and host APIs
 
-3. **Advanced routing**
+3. **Advanced routing and multi-link operation**
    - Multiple transports active simultaneously
    - Dynamic routing rules per device
+   - Clear policy for legacy device ID ranges versus NIO service IDs
 
-4. **OTA and configuration UX**
+4. **Configuration and management UX**
    - Web-based config UI backed by YAML/JSON store
    - Configurable per-profile defaults
+   - Richer diagnostic providers and CLI tooling
 
 5. **WebAssembly target**
    - Channels implemented in JS (WebSockets / WebUSB)
    - Same FujiBus + VirtualDevices running in-browser
+
+6. **Runtime logging controls**
+   - Runtime selection of log level/categories for POSIX and ESP32
+   - Optional packet tracing without changing the core device model
 
 ---
 
