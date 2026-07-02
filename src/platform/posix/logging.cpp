@@ -17,6 +17,7 @@ void early_logf(const char* fmt, ...)
     va_start(args, fmt);
     std::vfprintf(stderr, fmt, args);
     va_end(args);
+    std::fflush(stderr);
 }
 
 #if !defined(FN_DEBUG)
@@ -73,6 +74,7 @@ void vlogf(Level level, const char* tag, const char* fmt, std::va_list args)
     print_prefix(out, level, tag);
     std::vfprintf(out, fmt, args);
     std::fprintf(out, "\n");
+    std::fflush(out);
 }
 
 void logf(Level level, const char* tag, const char* fmt, ...)
@@ -93,6 +95,7 @@ void log(Level level, const char* tag, std::string_view message)
     std::fprintf(out, "%.*s\n",
                  static_cast<int>(message.size()),
                  message.data());
+    std::fflush(out);
 }
 
 #endif // defined(FN_DEBUG)
