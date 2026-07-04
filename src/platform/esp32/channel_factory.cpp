@@ -54,6 +54,12 @@ create_channel_for_profile(const build::BuildProfile& profile, const config::Fuj
                 config.channel.uart.dataBits);
         return std::make_unique<esp32::UartChannel>(config.channel.uart);
 
+    case ChannelKind::SioGpio:
+        FN_ELOG("Using UartChannel for SioGpio (baud=%u, data_bits=%d)",
+                static_cast<unsigned>(config.channel.uart.baudRate),
+                config.channel.uart.dataBits);
+        return std::make_unique<esp32::UartChannel>(config.channel.uart, esp32::pinmap().sio.uart);
+
     case ChannelKind::SerialPort:
         FN_LOGE(TAG, "SerialPort channel kind is POSIX-only; use UartGpio on ESP32");
         return nullptr;

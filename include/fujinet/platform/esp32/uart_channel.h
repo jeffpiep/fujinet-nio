@@ -26,6 +26,7 @@ class UartChannel : public fujinet::io::Channel {
 public:
     /// Host-facing UART from `channel.uart` in FujiConfig (baud, framing, optional RTS/CTS).
     explicit UartChannel(const config::UartConfig& uart_cfg = {});
+    UartChannel(const config::UartConfig& uart_cfg, const UartPins& uart_pins);
     ~UartChannel() override;
 
     bool available() override;
@@ -55,10 +56,13 @@ public:
 
 private:
     bool initialize();
+    UartPins selected_pins() const;
     /// Apply `uart_param_config` + `uart_set_pin` for current `_uart_cfg`.
     bool apply_hw_parameters(const UartPins& uart_pins);
     bool _initialized{false};
     config::UartConfig _uart_cfg{};
+    UartPins _uart_pins{};
+    bool _use_explicit_pins{false};
     
     // UART port number
     uart_port_t _uart_port{UART_NUM_1};

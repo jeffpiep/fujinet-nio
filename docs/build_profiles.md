@@ -73,7 +73,8 @@ enum class ChannelKind {
     UsbCdcDevice, // USB CDC device mode (ESP32S3, Pi gadget mode later)
     TcpSocket,    // TCP/IP serial channel for emulators/QEMU
     UdpSocket,    // UDP socket (for NetSIO protocol)
-    UartGpio,     // ESP32 GPIO-based UART (SIO, RS232, etc.)
+    UartGpio,     // ESP32 GPIO-based UART (RS232, etc.)
+    SioGpio,      // ESP32 Atari SIO connector as a raw FujiBus byte pipe
     SerialPort,   // POSIX serial port (RS-232 via /dev/ttyS* or /dev/ttyUSB*)
 };
 
@@ -124,6 +125,14 @@ BuildProfile current_build_profile()
         .primaryTransport = TransportKind::SIO,
         .primaryChannel   = ChannelKind::UdpSocket,
         .name             = "Atari + SIO over NetSIO (UDP)",
+        .hw               = {},
+    };
+#elif defined(FN_BUILD_ATARI_FUJIBUS_SIO)
+    profile = BuildProfile{
+        .machine          = Machine::Atari8Bit,
+        .primaryTransport = TransportKind::FujiBus,
+        .primaryChannel   = ChannelKind::SioGpio,
+        .name             = "Atari + FujiBus over SIO GPIO",
         .hw               = {},
     };
 #elif defined(FN_BUILD_ESP32_USB_CDC)
@@ -345,7 +354,27 @@ E.g. FujiBus over USB, or FujiBus over TCP.
 
 ---
 
-# 8. Where `#ifdef` is Allowed
+# 8. Atari NIO vs Atari legacy SIO
+
+Atari has two intentionally separate profile families:
+
+- **Atari NIO FujiBus over SIO** is selected by
+  `FN_BUILD_ATARI_FUJIBUS_SIO`. It uses `TransportKind::FujiBus` with
+  `ChannelKind::SioGpio`. In this mode, the Atari SIO connector is just the
+  physical byte pipe for the same FujiBus protocol used by BBC, MSDOS, Amiga,
+  Python, PTY/TCP, and USB CDC clients.
+- **Atari legacy SIO compatibility** is selected by `FN_BUILD_ATARI_SIO`,
+  `FN_BUILD_ATARI_PTY`, or `FN_BUILD_ATARI_NETSIO`. It uses
+  `TransportKind::SIO` and the legacy transport layer so unmodified Atari
+  FujiNet-firmware applications can be supported later.
+
+Do not route new Atari NIO work through the legacy SIO transport. If the host
+software speaks NIO/FujiBus, add channel/profile work around `SioGpio`; reserve
+`TransportKind::SIO` for legacy compatibility.
+
+---
+
+# 9. Where `#ifdef` is Allowed
 
 ### Allowed
 - `build_profile.cpp`
@@ -361,7 +390,7 @@ E.g. FujiBus over USB, or FujiBus over TCP.
 
 ---
 
-# 9. Adding a New Machine or Transport
+# 10. Adding a New Machine or Transport
 
 1. Add enum entries to:
    - `Machine`
@@ -377,7 +406,7 @@ E.g. FujiBus over USB, or FujiBus over TCP.
 
 ---
 
-# 10. Summary
+# 11. Summary
 
 - BuildProfile = identity of the firmware.
 - HardwareCapabilities = what the machine can actually do.
@@ -416,6 +445,13 @@ Currently supported profiles:
   - Used for POSIX builds with NetSIO protocol over UDP (connects to netsiohub bridge)
   - Requires NetSIO host/port configuration in `fujinet.yaml` (see `NetSioConfig` section)
   - CMake preset: `atari-netsio-debug` / `atari-netsio-release`
+
+- `FN_BUILD_ATARI_FUJIBUS_SIO`
+  - `machine          = Machine::Atari8Bit`
+  - `primaryTransport = TransportKind::FujiBus`
+  - `primaryChannel   = ChannelKind::SioGpio`
+  - Used for ESP32 builds where Atari hosts speak the NIO/FujiBus protocol over the SIO connector.
+  - PlatformIO environment: `atari-fujibus-sio-gpio`
 
 - `FN_BUILD_ESP32_USB_CDC`  
   - `machine          = Machine::FujiNetESP32`  

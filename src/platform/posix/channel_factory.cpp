@@ -580,6 +580,10 @@ create_channel_for_profile(const build::BuildProfile& profile, const config::Fuj
         std::cout << "[ChannelFactory] UartGpio not supported on POSIX (use Pty or UdpSocket for SIO testing).\n";
         return nullptr;
 
+    case ChannelKind::SioGpio:
+        std::cout << "[ChannelFactory] SioGpio not supported on POSIX.\n";
+        return nullptr;
+
     case ChannelKind::SerialPort:
         std::cout << "[ChannelFactory] Using RS-232 serial channel.\n";
         return create_serial_channel(config);

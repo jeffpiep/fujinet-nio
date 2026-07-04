@@ -78,6 +78,17 @@ UartChannel::UartChannel(const config::UartConfig& uart_cfg)
     }
 }
 
+UartChannel::UartChannel(const config::UartConfig& uart_cfg, const UartPins& uart_pins)
+    : _uart_cfg(uart_cfg),
+      _uart_pins(uart_pins),
+      _use_explicit_pins(true)
+{
+    _initialized = initialize();
+    if (!_initialized) {
+        FN_LOGE(TAG, "Failed to initialize UartChannel");
+    }
+}
+
 UartChannel::~UartChannel()
 {
     if (_initialized) {
@@ -160,9 +171,14 @@ bool UartChannel::apply_hw_parameters(const UartPins& uart_pins)
     return true;
 }
 
+UartPins UartChannel::selected_pins() const
+{
+    return _use_explicit_pins ? _uart_pins : pinmap().primaryUart();
+}
+
 bool UartChannel::initialize()
 {
-    const UartPins uart_pins = pinmap().primaryUart();
+    const UartPins uart_pins = selected_pins();
 
     if (uart_pins.rx < 0 || uart_pins.tx < 0) {
         FN_LOGE(TAG, "No valid UART pins configured in pinmap");
@@ -198,7 +214,7 @@ bool UartChannel::reconfigure(const config::UartConfig& cfg)
         return false;
     }
 
-    const UartPins uart_pins = pinmap().primaryUart();
+    const UartPins uart_pins = selected_pins();
     if (uart_pins.rx < 0 || uart_pins.tx < 0) {
         return false;
     }

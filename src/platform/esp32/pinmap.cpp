@@ -127,7 +127,8 @@ UartPins PinMap::primaryUart() const
     if (rs232.uart.rx >= 0 && rs232.uart.tx >= 0) {
         return rs232.uart;
     }
-    // Fall back to SIO UART if configured (for FN_BUILD_ATARI_SIO)
+    // Fall back to SIO UART if configured. Atari NIO builds should select
+    // ChannelKind::SioGpio to make this choice explicit.
     if (sio.uart.rx >= 0 && sio.uart.tx >= 0) {
         return sio.uart;
     }

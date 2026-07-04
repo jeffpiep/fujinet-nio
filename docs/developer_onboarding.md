@@ -481,10 +481,14 @@ core.addTransport(&myTransport);
 ```
 
 Use cases:
-- SIO transport for Atari  
+- Legacy SIO transport for Atari FujiNet-firmware compatibility
 - IEC for C64  
 - Emulator IPC transport  
 - WebUSB or WebSocket transport  
+
+For new Atari NIO clients, do **not** add or modify a legacy SIO transport.
+Use the standard `FujiBusTransport` and bind it to an Atari SIO GPIO channel
+instead.
 
 ---
 
@@ -638,7 +642,8 @@ If you're new and want actionable first tasks:
 
 ### Advanced Tasks
 - Add WebUSB transport (via Emscripten)
-- Implement Atari SIO or C64 IEC transport
+- Implement Atari NIO FujiBus over SIO GPIO
+- Implement legacy Atari SIO or C64 IEC transport
 - Improve RoutingManager to support override modes
 
 ---
@@ -663,4 +668,3 @@ If you have questions:
 - Open an Issue labelled **question**  
 
 Thanks for joining the project!
-

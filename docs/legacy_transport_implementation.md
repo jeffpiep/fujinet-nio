@@ -2,7 +2,13 @@
 
 ## Overview
 
-This document tracks the implementation status of the legacy transport layer for fujinet-nio, starting with Atari SIO support.
+This document tracks the implementation status of the legacy transport layer for fujinet-nio, starting with Atari SIO compatibility.
+
+This is **not** the primary path for new Atari NIO clients. New Atari NIO
+software should speak FujiBus and use the `FN_BUILD_ATARI_FUJIBUS_SIO` profile,
+which maps `TransportKind::FujiBus` onto the Atari SIO GPIO byte channel. The
+legacy SIO transport exists for later compatibility with unmodified Atari
+FujiNet-firmware applications.
 
 ## Completed Components
 

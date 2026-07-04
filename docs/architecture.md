@@ -598,6 +598,7 @@ enum class ChannelKind {
     TcpSocket,
     UdpSocket,
     UartGpio,
+    SioGpio,
     SerialPort,
 };
 
@@ -613,6 +614,22 @@ BuildProfile current_build_profile();
 
 } // namespace fujinet::build
 ```
+
+## Atari NIO vs Atari legacy SIO
+
+There are two distinct Atari tracks:
+
+- **Atari NIO mode** uses `TransportKind::FujiBus` over
+  `ChannelKind::SioGpio`. SIO is only the Atari physical connector/UART byte
+  path. The protocol remains the same FujiBus protocol used by BBC, Amiga,
+  MSDOS, Python, POSIX PTY/TCP, and USB CDC clients.
+- **Atari legacy mode** uses `TransportKind::SIO` and the legacy transport
+  layer. That path is for future compatibility with unmodified applications
+  written against existing Atari FujiNet firmware behavior.
+
+Initial Atari work should target **Atari NIO mode**. It should not depend on or
+extend the legacy SIO transport unless explicitly working on legacy
+compatibility.
 
 ## Mapping build flags to BuildProfile
 
@@ -642,6 +659,14 @@ BuildProfile current_build_profile()
         .primaryTransport = TransportKind::SIO,
         .primaryChannel   = ChannelKind::UdpSocket,
         .name             = "Atari + SIO over NetSIO (UDP)",
+    };
+
+#elif defined(FN_BUILD_ATARI_FUJIBUS_SIO)
+    BuildProfile p{
+        .machine          = Machine::Atari8Bit,
+        .primaryTransport = TransportKind::FujiBus,
+        .primaryChannel   = ChannelKind::SioGpio,
+        .name             = "Atari + FujiBus over SIO GPIO",
     };
 
 #elif defined(FN_BUILD_ESP32_USB_CDC)
@@ -1277,29 +1302,34 @@ network availability, time synchronization, or other cross-cutting conditions.
 
 1. **Additional legacy transports and profiles**
    - IWM and IEC transports
-   - More complete SIO hardware profiles beyond the current POSIX PTY/NetSIO paths
+   - More complete Atari legacy SIO compatibility profiles beyond the current POSIX PTY/NetSIO paths
 
-2. **Expanded device set and protocol depth**
+2. **Atari NIO FujiBus over SIO**
+   - Complete the `FN_BUILD_ATARI_FUJIBUS_SIO` ESP32 profile
+   - Use `TransportKind::FujiBus` over `ChannelKind::SioGpio`
+   - Keep this separate from Atari legacy SIO compatibility mode
+
+3. **Expanded device set and protocol depth**
    - Printer device
    - CP/M or other machine-specific devices if real host workflows need them
    - Continued modem-device compatibility work
    - Deeper NetworkDevice protocol coverage for additional schemes and host APIs
 
-3. **Advanced routing and multi-link operation**
+4. **Advanced routing and multi-link operation**
    - Multiple transports active simultaneously
    - Dynamic routing rules per device
    - Clear policy for legacy device ID ranges versus NIO service IDs
 
-4. **Configuration and management UX**
+5. **Configuration and management UX**
    - Web-based config UI backed by YAML/JSON store
    - Configurable per-profile defaults
    - Richer diagnostic providers and CLI tooling
 
-5. **WebAssembly target**
+6. **WebAssembly target**
    - Channels implemented in JS (WebSockets / WebUSB)
    - Same FujiBus + VirtualDevices running in-browser
 
-6. **Runtime logging controls**
+7. **Runtime logging controls**
    - Runtime selection of log level/categories for POSIX and ESP32
    - Optional packet tracing without changing the core device model
 
