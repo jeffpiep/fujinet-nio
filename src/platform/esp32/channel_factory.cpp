@@ -6,7 +6,9 @@
 #include "fujinet/io/core/channel.h"
 #include "fujinet/build/profile.h"
 #include "fujinet/config/fuji_config.h"
+#if defined(FN_BUILD_ATARI_FUJIBUS_SIO)
 #include "fujinet/platform/esp32/atari_sio_fujibus_channel.h"
+#endif
 #include "fujinet/platform/esp32/usb_cdc_channel.h"
 #include "fujinet/platform/esp32/uart_channel.h"
 
@@ -56,8 +58,13 @@ create_channel_for_profile(const build::BuildProfile& profile, const config::Fuj
         return std::make_unique<esp32::UartChannel>(config.channel.uart);
 
     case ChannelKind::SioGpio:
+#if defined(FN_BUILD_ATARI_FUJIBUS_SIO)
         FN_ELOG("Using Atari SIO FujiBus channel for SioGpio");
         return esp32::create_atari_sio_fujibus_channel(config);
+#else
+        FN_LOGE(TAG, "SioGpio selected but FN_BUILD_ATARI_FUJIBUS_SIO is not enabled");
+        return nullptr;
+#endif
 
     case ChannelKind::SerialPort:
         FN_LOGE(TAG, "SerialPort channel kind is POSIX-only; use UartGpio on ESP32");

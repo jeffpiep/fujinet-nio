@@ -1,3 +1,5 @@
+#if defined(FN_BUILD_ATARI_FUJIBUS_SIO)
+
 #include "fujinet/platform/esp32/atari_sio_fujibus_channel.h"
 
 #include "fujinet/core/logging.h"
@@ -182,3 +184,5 @@ create_atari_sio_fujibus_channel(const fujinet::config::FujiConfig& config)
 }
 
 } // namespace fujinet::platform::esp32
+
+#endif // defined(FN_BUILD_ATARI_FUJIBUS_SIO)
