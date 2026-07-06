@@ -22,6 +22,16 @@ void FujinetCore::tick()
     ++_tickCount;
 }
 
+bool FujinetCore::hasWaitableWorkSource() const
+{
+    return _ioService.hasWaitableWorkSource();
+}
+
+bool FujinetCore::waitForWork(std::chrono::milliseconds timeout)
+{
+    return _ioService.waitForWork(timeout);
+}
+
 void FujinetCore::addTransport(io::ITransport* transport)
 {
     _ioService.addTransport(transport);

@@ -88,6 +88,15 @@ bool UdpChannel::available()
     return socket_ops_.poll_readable(socket_fd_);
 }
 
+bool UdpChannel::wait_for_readable(std::chrono::milliseconds timeout)
+{
+    if (!connected_ || socket_fd_ < 0) {
+        return false;
+    }
+
+    return socket_ops_.wait_readable(socket_fd_, timeout);
+}
+
 std::size_t UdpChannel::read(std::uint8_t* buffer, std::size_t max_len)
 {
     if (!connected_ || socket_fd_ < 0 || !buffer) {

@@ -50,13 +50,17 @@ public:
     }
 
     bool poll_readable(int fd) override {
+        return wait_readable(fd, std::chrono::milliseconds(0));
+    }
+
+    bool wait_readable(int fd, std::chrono::milliseconds timeout_ms) override {
         fd_set read_fds;
         FD_ZERO(&read_fds);
         FD_SET(fd, &read_fds);
 
         struct timeval tv;
-        tv.tv_sec = 0;
-        tv.tv_usec = 0;
+        tv.tv_sec = static_cast<time_t>(timeout_ms.count() / 1000);
+        tv.tv_usec = static_cast<suseconds_t>((timeout_ms.count() % 1000) * 1000);
 
         int ret = select(fd + 1, &read_fds, nullptr, nullptr, &tv);
         return ret > 0;

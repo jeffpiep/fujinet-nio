@@ -42,7 +42,7 @@ static constexpr const char* TAG = "nio";
 
 namespace {
 
-std::chrono::milliseconds posix_loop_delay_for_profile(const build::BuildProfile& profile)
+std::chrono::milliseconds posix_idle_delay()
 {
     if (const char* raw = std::getenv("FN_POSIX_LOOP_DELAY_MS")) {
         char* end = nullptr;
@@ -53,15 +53,7 @@ std::chrono::milliseconds posix_loop_delay_for_profile(const build::BuildProfile
         FN_LOGW(TAG, "Ignoring invalid FN_POSIX_LOOP_DELAY_MS=%s", raw);
     }
 
-    const bool atariNetsioFujiBus =
-        profile.machine == build::Machine::Atari8Bit &&
-        profile.primaryTransport == build::TransportKind::FujiBus &&
-        profile.primaryChannel == build::ChannelKind::UdpSocket;
-
-    // NetSIO/Altirra exchanges complete via the cooperative Channel poll path.
-    // Keep this profile responsive enough for Atari SIO command/data handshakes.
-    return atariNetsioFujiBus ? std::chrono::milliseconds(1)
-                              : std::chrono::milliseconds(50);
+    return std::chrono::milliseconds(50);
 }
 
 } // namespace
@@ -241,8 +233,11 @@ int main()
     }
     core::setup_transports(core, *channel, profile, &config);
 
-    const auto loopDelay = posix_loop_delay_for_profile(profile);
-    FN_LOGI(TAG, "POSIX loop delay: %lld ms", static_cast<long long>(loopDelay.count()));
+    const auto idleDelay = posix_idle_delay();
+    FN_LOGI(TAG,
+            "POSIX idle delay: %lld ms (%s transport wait)",
+            static_cast<long long>(idleDelay.count()),
+            core.hasWaitableWorkSource() ? "using" : "no");
 
     // Run core loop until the process is terminated (Ctrl+C, kill, etc.).
     bool running = true;
@@ -261,7 +256,11 @@ int main()
             return 75;
 #endif
         }
-        std::this_thread::sleep_for(loopDelay);
+        if (core.hasWaitableWorkSource()) {
+            core.waitForWork(idleDelay);
+        } else {
+            std::this_thread::sleep_for(idleDelay);
+        }
     }
 
     // (Unreachable for now, but kept for future clean shutdown logic.)

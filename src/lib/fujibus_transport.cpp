@@ -32,6 +32,19 @@ void FujiBusTransport::poll()
     // All framing is handled in receive() via SLIP + FujiBusPacket.
 }
 
+bool FujiBusTransport::supports_work_wait() const
+{
+    return _channel.supports_readable_wait();
+}
+
+bool FujiBusTransport::wait_for_work(std::chrono::milliseconds timeout)
+{
+    if (!_rxBuffer.empty()) {
+        return true;
+    }
+    return _channel.wait_for_readable(timeout);
+}
+
 // Helper: try to extract a single SLIP-framed message from _rxBuffer.
 // We look for: SlipByte::End ... SlipByte::End, and return that span (inclusive).
 static bool extractSlipFrame(std::vector<std::uint8_t>& buffer, ByteBuffer& outFrame)

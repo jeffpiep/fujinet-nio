@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <vector>
 
 #include "fujinet/io/core/io_message.h"
@@ -28,6 +29,12 @@ public:
     // - Route them through the handler
     // - Send responses back via the same transport
     void serviceOnce();
+
+    // Wait until any transport can make progress, up to timeout.
+    // Returns false when no registered transport has a waitable source or when
+    // the wait timed out. Callers own any fallback sleep policy.
+    bool hasWaitableWorkSource() const;
+    bool waitForWork(std::chrono::milliseconds timeout);
 
 private:
     IRequestHandler&              _handler;

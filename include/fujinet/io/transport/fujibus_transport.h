@@ -18,6 +18,8 @@ public:
     {}
 
     void poll() override;
+    bool supports_work_wait() const override;
+    bool wait_for_work(std::chrono::milliseconds timeout) override;
 
     bool receive(IORequest& outReq) override;
     void send(const IOResponse& resp) override;

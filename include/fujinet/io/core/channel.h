@@ -2,6 +2,7 @@
 #pragma once
 
 #include <cstddef>
+#include <chrono>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -22,6 +23,16 @@ public:
 
     // Write len bytes from buffer.
     virtual void write(const std::uint8_t* buffer, std::size_t len) = 0;
+
+    // Optionally wait until the channel may have bytes to read.
+    // Returns true if work may be available now. The default is non-blocking
+    // and lets the application loop fall back to its normal idle delay.
+    virtual bool supports_readable_wait() const { return false; }
+
+    virtual bool wait_for_readable(std::chrono::milliseconds timeout) {
+        (void)timeout;
+        return false;
+    }
 };
 
 } // namespace fujinet::io

@@ -65,6 +65,19 @@ public:
         FN_LOGD(TAG, "queued SIO read response: %zu bytes pending=%zu", len, _tx.size());
     }
 
+    bool supports_readable_wait() const override
+    {
+        return _udp && _udp->supports_readable_wait();
+    }
+
+    bool wait_for_readable(std::chrono::milliseconds timeout) override
+    {
+        if (!_rx.empty()) {
+            return true;
+        }
+        return _udp && _udp->wait_for_readable(timeout);
+    }
+
 private:
     void write_netsio()
     {

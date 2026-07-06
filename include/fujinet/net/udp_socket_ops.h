@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <chrono>
 #include <cstddef>
 
 // Forward declarations only - no platform headers
@@ -49,6 +50,9 @@ public:
 
     // Poll for readable data. Returns true if data is available to read.
     virtual bool poll_readable(int fd) = 0;
+
+    // Wait until readable data may be available, up to timeout.
+    virtual bool wait_readable(int fd, std::chrono::milliseconds timeout) = 0;
 
     // Address resolution
     virtual int getaddrinfo(const char* host, const char* port, const void* hints, AddrInfo** out) = 0;

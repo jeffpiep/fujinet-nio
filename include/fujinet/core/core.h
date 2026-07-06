@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <cstdint>
 #include "fujinet/core/system_events.h"
 #include "fujinet/io/core/io_device_manager.h"
@@ -22,6 +23,10 @@ public:
 
     // One iteration of the core loop.
     void tick();
+
+    // Wait until a registered transport may have work for the next tick.
+    bool hasWaitableWorkSource() const;
+    bool waitForWork(std::chrono::milliseconds timeout);
 
     // How many ticks have been executed so far.
     std::uint64_t tick_count() const noexcept { return _tickCount; }

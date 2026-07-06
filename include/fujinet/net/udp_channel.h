@@ -20,6 +20,8 @@ public:
     bool available() override;
     std::size_t read(std::uint8_t* buffer, std::size_t max_len) override;
     void write(const std::uint8_t* buffer, std::size_t len) override;
+    bool supports_readable_wait() const override { return true; }
+    bool wait_for_readable(std::chrono::milliseconds timeout) override;
 
 private:
     IUdpSocketOps& socket_ops_;

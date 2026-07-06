@@ -38,6 +38,7 @@ extern "C" {
 #include "fujinet/diag/diagnostic_registry.h"
 #include "fujinet/fs/mount_applier.h"
 
+#include <chrono>
 #include <memory>
 #include <unistd.h>
 
@@ -300,6 +301,7 @@ extern "C" void fujinet_core_task(void* arg)
     }
 
     const std::uint64_t phase1_at = core.tick_count() + 100;
+    const auto idleDelay = std::chrono::milliseconds(20);
     
     FN_ELOG("[%u ms] starting main loop", (unsigned)(esp_timer_get_time()/1000));
 
@@ -327,7 +329,11 @@ extern "C" void fujinet_core_task(void* arg)
 //         }
 // #endif
 
-        vTaskDelay(pdMS_TO_TICKS(20));
+        if (core.hasWaitableWorkSource()) {
+            core.waitForWork(idleDelay);
+        } else {
+            vTaskDelay(pdMS_TO_TICKS(idleDelay.count()));
+        }
     }
     FN_LOGI(TAG, "core task exiting");
 }
