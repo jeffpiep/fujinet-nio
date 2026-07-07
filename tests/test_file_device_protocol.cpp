@@ -103,6 +103,36 @@ std::vector<std::uint8_t> make_list_request_with_flags(
     return payload;
 }
 
+std::vector<std::uint8_t> make_read_request(
+    std::string_view uri, std::uint32_t offset, std::uint16_t max_bytes)
+{
+    auto payload = make_uri_request(uri);
+    append_u32le(payload, offset);
+    append_u16le(payload, max_bytes);
+    return payload;
+}
+
+std::vector<std::uint8_t> make_write_request(
+    std::string_view uri, std::uint32_t offset, std::string_view data)
+{
+    auto payload = make_uri_request(uri);
+    append_u32le(payload, offset);
+    append_u16le(payload, static_cast<std::uint16_t>(data.size()));
+    payload.insert(payload.end(), data.begin(), data.end());
+    return payload;
+}
+
+std::vector<std::uint8_t> make_mkdir_request(
+    std::string_view uri, bool parents, bool exist_ok)
+{
+    auto payload = make_uri_request(uri);
+    std::uint8_t flags = 0;
+    if (parents) flags |= 0x01;
+    if (exist_ok) flags |= 0x02;
+    append_u8(payload, flags);
+    return payload;
+}
+
 std::size_t list_entry_span_bytes(std::uint8_t name_len, bool compact)
 {
     return 2U + static_cast<std::size_t>(name_len) + (compact ? 0U : 16U);
@@ -666,6 +696,46 @@ TEST_CASE("FileDevice ResolvePath returns IOError when resolved target probe fai
     const auto response = device.handle(request);
     CHECK(response.status == StatusCode::IOError);
     CHECK(response.payload.empty());
+}
+
+TEST_CASE("FileDevice resolves persist URI through default persistent filesystem")
+{
+    StorageManager storage;
+    CHECK(storage.registerFileSystem(std::make_unique<fujinet::tests::MemoryFileSystem>("flash")));
+    CHECK(storage.registerFileSystem(std::make_unique<fujinet::tests::MemoryFileSystem>("host")));
+
+    FileDevice device(storage);
+
+    IORequest mkdir{};
+    mkdir.command = static_cast<std::uint16_t>(FileCommand::MakeDirectory);
+    mkdir.payload = make_mkdir_request("persist:///FujiNet", true, true);
+    CHECK(device.handle(mkdir).status == StatusCode::Ok);
+
+    IORequest write{};
+    write.command = static_cast<std::uint16_t>(FileCommand::WriteFile);
+    write.payload = make_write_request("persist:///FujiNet/fe0c0101.key", 0, "legacy-key");
+    const auto write_response = device.handle(write);
+    CHECK(write_response.status == StatusCode::Ok);
+    REQUIRE(write_response.payload.size() >= 10);
+    CHECK(read_u16le(write_response.payload, 8) == 10);
+
+    IORequest read{};
+    read.command = static_cast<std::uint16_t>(FileCommand::ReadFile);
+    read.payload = make_read_request("persist:///FujiNet/fe0c0101.key", 0, 64);
+    const auto read_response = device.handle(read);
+    CHECK(read_response.status == StatusCode::Ok);
+    REQUIRE(read_response.payload.size() >= 10);
+    CHECK(read_u16le(read_response.payload, 8) == 10);
+    const std::string value(read_response.payload.begin() + 10, read_response.payload.end());
+    CHECK(value == "legacy-key");
+
+    auto* host = storage.get("host");
+    REQUIRE(host != nullptr);
+    CHECK(host->exists("/FujiNet/fe0c0101.key"));
+
+    auto* flash = storage.get("flash");
+    REQUIRE(flash != nullptr);
+    CHECK_FALSE(flash->exists("/FujiNet/fe0c0101.key"));
 }
 
 TEST_CASE("FileDevice AppStore write/read/stat stores namespaced values on host filesystem")

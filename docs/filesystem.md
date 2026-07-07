@@ -246,6 +246,22 @@ Legacy appkey compatibility can use the same selected filesystem and store/read
 the legacy files directly under the legacy path, without converting them into
 the newer app-store layout.
 
+For protocol clients that address files by URI, `StorageManager::resolveUri()`
+also supports the `persist://` alias:
+
+```text
+persist:///FujiNet/fe0c0101.key
+```
+
+This resolves to the same default persistent filesystem selected above while
+preserving the filesystem-relative path (`/FujiNet/fe0c0101.key`). It lets
+compatibility clients refer to persistent files without knowing whether the
+concrete target is `host:`, `sd0:`, or `flash:`.
+
+Use the triple-slash form for absolute paths. This keeps the string compatible
+with clients that route FujiNet operations by detecting `://`: the URI scheme is
+`persist`, the authority is empty, and the path is `/FujiNet/fe0c0101.key`.
+
 ---
 
 ## 6. URI Paths And Path Resolver Layer

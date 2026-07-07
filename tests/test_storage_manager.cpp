@@ -151,6 +151,56 @@ TEST_CASE("StorageManager: default persistent filesystem const overload")
     CHECK(fs->name() == "host");
 }
 
+TEST_CASE("StorageManager: resolveUri maps persist scheme to default persistent filesystem")
+{
+    StorageManager manager;
+
+    CHECK(manager.registerFileSystem(std::make_unique<MockFileSystem>("flash")));
+    CHECK(manager.registerFileSystem(std::make_unique<MockFileSystem>("sd0")));
+    CHECK(manager.registerFileSystem(std::make_unique<MockFileSystem>("host")));
+
+    auto [fs, path] = manager.resolveUri("persist:///FujiNet/fe0c0101.key");
+    REQUIRE(fs != nullptr);
+    CHECK(fs->name() == "host");
+    CHECK(path == "/FujiNet/fe0c0101.key");
+}
+
+TEST_CASE("StorageManager: resolveUri maps persist scheme to sd0 when host absent")
+{
+    StorageManager manager;
+
+    CHECK(manager.registerFileSystem(std::make_unique<MockFileSystem>("flash")));
+    CHECK(manager.registerFileSystem(std::make_unique<MockFileSystem>("sd0")));
+
+    auto [fs, path] = manager.resolveUri("persist:///FujiNet/fe0c0101.key");
+    REQUIRE(fs != nullptr);
+    CHECK(fs->name() == "sd0");
+    CHECK(path == "/FujiNet/fe0c0101.key");
+}
+
+TEST_CASE("StorageManager: resolveUri maps persist scheme to flash fallback")
+{
+    StorageManager manager;
+
+    CHECK(manager.registerFileSystem(std::make_unique<MockFileSystem>("flash")));
+
+    auto [fs, path] = manager.resolveUri("persist:///FujiNet/../FujiNet/e41c0101.key");
+    REQUIRE(fs != nullptr);
+    CHECK(fs->name() == "flash");
+    CHECK(path == "/FujiNet/e41c0101.key");
+}
+
+TEST_CASE("StorageManager: resolveUri rejects persist scheme when no persistent filesystem exists")
+{
+    StorageManager manager;
+
+    CHECK(manager.registerFileSystem(std::make_unique<MockFileSystem>("tnfs")));
+
+    auto [fs, path] = manager.resolveUri("persist:///FujiNet/fe0c0101.key");
+    CHECK(fs == nullptr);
+    CHECK(path == "");
+}
+
 TEST_CASE("StorageManager: resolveUri")
 {
     StorageManager manager;

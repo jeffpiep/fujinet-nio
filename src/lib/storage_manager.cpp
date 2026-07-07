@@ -1,6 +1,7 @@
 #include "fujinet/fs/storage_manager.h"
 #include "fujinet/fs/filesystem.h"
 #include "fujinet/fs/path_resolvers/path_resolver.h"
+#include "fujinet/fs/path_resolvers/path_resolver_utils.h"
 #include "fujinet/fs/uri_parser.h"
 
 #include <cctype>
@@ -115,6 +116,19 @@ std::pair<IFileSystem*, std::string> StorageManager::resolveUri(const std::strin
 {
     // Parse the URI first to understand its structure
     auto parts = parse_uri(uri);
+
+    // "persist:" is a virtual URI scheme for the platform-neutral persistent
+    // filesystem. The public form is "persist:///path", so clients that route
+    // FujiNet paths by looking for "://" will send it to us. Older/prefix-style
+    // "persist:/path" also resolves here because parse_uri() normalizes both
+    // forms into a scheme and path.
+    if (iequals(parts.scheme, "persist")) {
+        auto* fs = defaultPersistentFileSystem();
+        if (!fs || parts.path.empty()) {
+            return {nullptr, ""};
+        }
+        return {fs, fs_norm(parts.path)};
+    }
     
     // Use the PathResolver to handle all URI/path patterns
     PathContext ctx;

@@ -11,6 +11,10 @@ It is designed to be:
 
 This protocol sits **above** the filesystem abstraction (`IFileSystem`/`IFile`) and is **not** the same thing as filesystem implementation details.
 
+File commands that take a URI may use `persist:///...` when the client wants
+platform-neutral persistent storage. The device resolves this through
+`StorageManager::defaultPersistentFileSystem()` before opening the file.
+
 ---
 
 ## Terminology
@@ -19,6 +23,7 @@ This protocol sits **above** the filesystem abstraction (`IFileSystem`/`IFile`) 
 - **Device**: `FileDevice` in fujinet-nio.
 - **FS name**: a string key in `StorageManager` (e.g. `"sd0"`, `"flash"`, `"host"`, `"tnfs"`).
 - **Path**: POSIX-style path within the selected filesystem (e.g. `"/"`, `"/FOO/BAR.TXT"`).
+- **Persistent URI**: `persist:///path` resolves to the platform's default persistent filesystem (`host`, then `sd0`, then `flash`). The empty authority keeps this compatible with clients that detect FujiNet paths via `://`.
 - **LE**: little-endian.
 - **Chunking**: host requests file data in blocks using `offset` + `maxBytes`.
 
